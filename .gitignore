@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data directories
+backend/data/books/*
+backend/data/audio/*
+backend/data/reference/*
+!backend/data/books/.gitkeep
+!backend/data/audio/.gitkeep
+!backend/data/reference/.gitkeep
+
+# Reference audio files
+reference_audio/*.wav
+reference_audio/*.mp3
+reference_audio/*.m4a
+reference_audio/*.ogg
+reference_audio/*.flac
+reference_audio/*.aac
+reference_audio/*.tgz
+reference_audio/*:Zone.Identifier
+
+# Test books
+test_books/
+
+# Database
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Large model files
+*.safetensors
+*.bin

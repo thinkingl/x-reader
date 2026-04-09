@@ -1,0 +1,58 @@
+.logo {
+  height: 64px;
+  line-height: 64px;
+  text-align: center;
+  color: #fff;
+  font-size: 20px;
+  font-weight: bold;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 16px;
+  border-radius: 8px;
+}
+
+.site-layout-header {
+  background: #fff !important;
+  padding: 0 24px !important;
+}
+
+.audio-player-container {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #fff;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  padding: 12px 24px;
+}
+
+.chapter-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.chapter-status-completed {
+  background: #f6ffed;
+  color: #52c41a;
+  border: 1px solid #b7eb8f;
+}
+
+.chapter-status-pending {
+  background: #fff7e6;
+  color: #fa8c16;
+  border: 1px solid #ffd591;
+}
+
+.chapter-status-failed {
+  background: #fff2f0;
+  color: #f5222d;
+  border: 1px solid #ffccc7;
+}
+
+.chapter-status-converting {
+  background: #e6f7ff;
+  color: #1890ff;
+  border: 1px solid #91d5ff;
+}
