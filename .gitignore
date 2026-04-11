@@ -46,6 +46,11 @@ test_books/
 # Database
 *.db
 
+# iOS
+ios/.build/
+ios/*/xcuserdata/
+*.xcuserstate
+
 # OS
 .DS_Store
 Thumbs.db
