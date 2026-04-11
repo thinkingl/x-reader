@@ -196,6 +196,43 @@ x-reader/
 |------|------|------|
 | GET | /api/config | 获取配置 |
 | PUT | /api/config | 更新配置 |
+| POST | /api/config/test | 测试 TTS 配置 |
+| GET | /api/config/test-audio/{filename} | 获取测试音频 |
+
+### 认证
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/auth/challenge | 获取 challenge |
+| POST | /api/auth/verify | 登录验证 |
+| POST | /api/auth/enable | 启用认证 |
+| POST | /api/auth/disable | 停用认证（需验证） |
+| GET | /api/auth/status | 获取认证状态 |
+
+## iOS 客户端
+
+项目包含一个 iOS 原生客户端，位于 `ios/` 目录。
+
+### 环境要求
+
+- Xcode 15+
+- iOS 17+
+
+### 运行
+
+```bash
+open ios/xReader.xcodeproj
+```
+
+选择模拟器或设备后 Cmd+R 运行。
+
+### 功能
+
+- 首次启动输入服务器地址
+- 图书列表、上传、详情、章节转换
+- 语音预设管理
+- 音频播放（支持锁屏控制）
+- 任务进度实时显示
 
 ## 技术栈
 
@@ -206,8 +243,10 @@ x-reader/
 | 任务队列 | ThreadPoolExecutor |
 | 电子书解析 | zipfile + xml.etree (EPUB), PyMuPDF (PDF) |
 | TTS 引擎 | OmniVoice |
+| ASR 引擎 | Whisper (HuggingFace) |
 | 音频处理 | torchaudio + ffmpeg |
-| 前端框架 | React + Ant Design |
+| Web 前端 | React + Ant Design |
+| iOS 客户端 | SwiftUI (iOS 17+) |
 | 路由 | React Router |
 
 ## 测试
