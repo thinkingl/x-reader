@@ -415,7 +415,7 @@ function VoicePresets() {
                       />
                       <audio
                         ref={audioRef}
-                        src={`http://localhost:8000${uploadedAudioUrl}`}
+                        src={`${api.defaults.baseURL}${uploadedAudioUrl}`}
                         onEnded={() => setIsPlaying(false)}
                         controls
                         style={{ flex: 1, height: 32 }}

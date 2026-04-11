@@ -13,8 +13,47 @@ struct ConfigView: View {
     @State private var testResult: String?
     @State private var isTesting = false
 
+    // Auth state
+    @State private var authKey = ""
+    @State private var newAuthKey = ""
+    @State private var authLoading = false
+    @State private var authMessage: String?
+
     var body: some View {
         Form {
+            Section("认证设置") {
+                HStack {
+                    Text("状态")
+                    Spacer()
+                    Text(settings.isAuthEnabled ? "已启用" : "未启用")
+                        .foregroundStyle(settings.isAuthEnabled ? .green : .secondary)
+                }
+
+                if settings.isAuthEnabled {
+                    SecureField("当前认证密钥", text: $authKey)
+                    Button(role: .destructive) {
+                        Task { await disableAuth() }
+                    } label: {
+                        Label(authLoading ? "处理中..." : "停用认证", systemImage: "lock.open")
+                    }
+                    .disabled(authKey.isEmpty || authLoading)
+                } else {
+                    SecureField("设置认证密钥", text: $newAuthKey)
+                    Button {
+                        Task { await enableAuth() }
+                    } label: {
+                        Label(authLoading ? "处理中..." : "启用认证", systemImage: "lock")
+                    }
+                    .disabled(newAuthKey.isEmpty || authLoading)
+                }
+
+                if let msg = authMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("服务器地址") {
                 TextField("服务器 URL", text: $serverURL)
                     .autocorrectionDisabled()
@@ -77,6 +116,7 @@ struct ConfigView: View {
         .task {
             serverURL = settings.serverURL
             await loadConfig()
+            await settings.checkAuthStatus()
         }
     }
 
@@ -95,6 +135,62 @@ struct ConfigView: View {
         await settings.checkConnection()
         if settings.isConnected {
             await loadConfig()
+            await settings.checkAuthStatus()
+        }
+    }
+
+    private func enableAuth() async {
+        authLoading = true
+        authMessage = nil
+        defer { authLoading = false }
+
+        do {
+            let salt = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
+            let keyHash = computeSHA256(salt + newAuthKey)
+
+            let request = AuthEnableRequest(key_hash: keyHash, key_salt: salt)
+            let result: AuthResponse = try await client.post("/api/auth/enable", body: request)
+
+            if result.success {
+                authMessage = "认证已启用"
+                await settings.checkAuthStatus()
+                newAuthKey = ""
+            } else {
+                authMessage = result.message
+            }
+        } catch {
+            authMessage = "启用失败: \(error.localizedDescription)"
+        }
+    }
+
+    private func disableAuth() async {
+        authLoading = true
+        authMessage = nil
+        defer { authLoading = false }
+
+        do {
+            let challenge: AuthChallengeResponse = try await client.post("/api/auth/challenge")
+
+            // First compute the key hash (same as stored on server)
+            let keyHash = computeSHA256(challenge.salt + authKey)
+
+            // Then compute HMAC response using the key hash
+            let response = computeHMAC(key: keyHash, nonce: challenge.nonce, timestamp: challenge.timestamp)
+
+            let request = AuthDisableRequest(response: response, timestamp: challenge.timestamp)
+            let result: AuthResponse = try await client.post("/api/auth/disable", body: request)
+
+            if result.success {
+                authMessage = "认证已停用"
+                client.authToken = nil
+                settings.isAuthenticated = false
+                await settings.checkAuthStatus()
+                authKey = ""
+            } else {
+                authMessage = result.message
+            }
+        } catch {
+            authMessage = "停用失败: \(error.localizedDescription)"
         }
     }
 
@@ -115,6 +211,10 @@ struct ConfigView: View {
             request.httpMethod = "POST"
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
+            if let token = client.authToken {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+
             var body = Data()
             for (key, value) in formData {
                 body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -131,4 +231,27 @@ struct ConfigView: View {
             testResult = "测试失败: \(error.localizedDescription)"
         }
     }
+
+    private func computeHMAC(key: String, nonce: String, timestamp: Int) -> String {
+        let message = "\(nonce)\(timestamp)"
+        let keyData = Data(key.utf8)
+        let messageData = Data(message.utf8)
+
+        var hmac = [UInt8](repeating: 0, count: 32)
+        CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA256), keyData.withUnsafeBytes { $0.baseAddress }, keyData.count,
+               messageData.withUnsafeBytes { $0.baseAddress }, messageData.count, &hmac)
+
+        return hmac.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func computeSHA256(_ input: String) -> String {
+        let data = Data(input.utf8)
+        var hash = [UInt8](repeating: 0, count: 32)
+        data.withUnsafeBytes { buffer in
+            _ = CC_SHA256(buffer.baseAddress, CC_LONG(data.count), &hash)
+        }
+        return hash.map { String(format: "%02x", $0) }.joined()
+    }
 }
+
+import CommonCrypto

@@ -8,7 +8,15 @@ struct XReaderApp: App {
     var body: some Scene {
         WindowGroup {
             if settings.isConnected {
-                MainTabView(client: settings.makeAPIClient(), player: player, settings: settings)
+                if settings.isAuthEnabled && !settings.isAuthenticated {
+                    LoginView(client: settings.makeAPIClient(), settings: settings) {
+                        Task {
+                            await settings.checkAuthStatus()
+                        }
+                    }
+                } else {
+                    MainTabView(client: settings.makeAPIClient(), player: player, settings: settings)
+                }
             } else {
                 ConnectionSetupView(settings: settings)
             }
@@ -76,6 +84,9 @@ struct ConnectionSetupView: View {
     private func connect() async {
         settings.serverURL = url
         await settings.checkConnection()
+        if settings.isConnected {
+            await settings.checkAuthStatus()
+        }
         if !settings.isConnected {
             showError = true
         }

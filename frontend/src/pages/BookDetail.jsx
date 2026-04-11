@@ -120,7 +120,7 @@ function BookDetail() {
   const handlePlay = (chapter) => {
     if (chapter.audio_path) {
       playAudio({
-        url: `http://localhost:8000/api/audio/${id}/${chapter.id}/stream`,
+        url: `${api.defaults.baseURL}/api/audio/${id}/${chapter.id}/stream`,
         title: chapter.title,
         bookTitle: book?.title,
       });

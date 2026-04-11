@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Form, Input, Select, InputNumber, Button, Card, message, Alert, Spin } from 'antd';
-import { PlayCircleOutlined, PauseCircleOutlined, AudioOutlined } from '@ant-design/icons';
+import { Form, Input, Select, InputNumber, Button, Card, message, Alert, Spin, Switch, Typography, Divider } from 'antd';
+import { PlayCircleOutlined, PauseCircleOutlined, AudioOutlined, LockOutlined, UnlockOutlined } from '@ant-design/icons';
 import api from '../api';
+import { useAuth } from '../AuthContext';
+
+const { Title, Text } = Typography;
 
 function Configuration() {
   const [config, setConfig] = useState(null);
   const [presets, setPresets] = useState([]);
+  const { isAuthEnabled, enableAuth, disableAuth, logout } = useAuth();
 
   // 测试相关状态
   const [testText, setTestText] = useState('你好，这是一段测试文本。用于验证语音合成的效果。');
@@ -14,6 +18,11 @@ function Configuration() {
   const [testResult, setTestResult] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef(null);
+
+  // 认证相关状态
+  const [authKey, setAuthKey] = useState('');
+  const [newAuthKey, setNewAuthKey] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
 
   useEffect(() => {
     fetchConfig();
@@ -45,6 +54,40 @@ function Configuration() {
       fetchConfig();
     } catch (err) {
       message.error('保存配置失败');
+    }
+  };
+
+  // 认证功能
+  const handleEnableAuth = async () => {
+    if (!newAuthKey.trim()) {
+      message.warning('请输入认证密钥');
+      return;
+    }
+    setAuthLoading(true);
+    const result = await enableAuth(newAuthKey);
+    setAuthLoading(false);
+    if (result.success) {
+      message.success('认证已启用');
+      setNewAuthKey('');
+    } else {
+      message.error(result.message || '启用认证失败');
+    }
+  };
+
+  const handleDisableAuth = async () => {
+    if (!authKey.trim()) {
+      message.warning('请输入当前认证密钥');
+      return;
+    }
+    setAuthLoading(true);
+    const result = await disableAuth(authKey);
+    setAuthLoading(false);
+    if (result.success) {
+      message.success('认证已停用');
+      setAuthKey('');
+      logout();
+    } else {
+      message.error(result.message || '停用认证失败');
     }
   };
 
@@ -93,6 +136,64 @@ function Configuration() {
 
   return (
     <div>
+      {/* 认证设置卡片 */}
+      <Card title={<><LockOutlined /> 认证设置</>} style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>当前状态: </Text>
+          <Text type={isAuthEnabled ? 'success' : 'secondary'}>
+            {isAuthEnabled ? '认证已启用' : '认证未启用'}
+          </Text>
+        </div>
+
+        {!isAuthEnabled ? (
+          <div>
+            <Title level={5}>启用认证</Title>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+              启用认证后，所有 API 请求需要携带有效的 Token
+            </Text>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+              <Input.Password
+                placeholder="设置认证密钥"
+                value={newAuthKey}
+                onChange={(e) => setNewAuthKey(e.target.value)}
+                style={{ width: 300 }}
+              />
+              <Button
+                type="primary"
+                icon={<LockOutlined />}
+                onClick={handleEnableAuth}
+                loading={authLoading}
+              >
+                启用认证
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <Title level={5}>停用认证</Title>
+            <Text type="warning" style={{ display: 'block', marginBottom: 16 }}>
+              停用认证需要验证当前密钥
+            </Text>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+              <Input.Password
+                placeholder="输入当前认证密钥"
+                value={authKey}
+                onChange={(e) => setAuthKey(e.target.value)}
+                style={{ width: 300 }}
+              />
+              <Button
+                danger
+                icon={<UnlockOutlined />}
+                onClick={handleDisableAuth}
+                loading={authLoading}
+              >
+                停用认证
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
+
       <Card title="TTS 引擎配置" style={{ marginBottom: 16 }}>
         <Form layout="vertical" initialValues={config} onFinish={handleConfigSave}>
           <Form.Item label="模型路径" name="model_path">
@@ -223,7 +324,7 @@ function Configuration() {
                 </div>
                 <audio
                   ref={audioRef}
-                  src={`http://localhost:8000${testResult.audio_url}`}
+                  src={`${api.defaults.baseURL}${testResult.audio_url}`}
                   onEnded={() => setIsPlaying(false)}
                   controls
                   style={{ width: '100%' }}

@@ -169,3 +169,37 @@ class ConfigResponse(BaseModel):
     chunk_size: int = 200
     book_dir: str = "data/books"
     audio_dir: str = "data/audio"
+
+
+# Auth schemas
+class AuthStatusResponse(BaseModel):
+    enabled: bool
+    has_key: bool
+
+
+class AuthChallengeResponse(BaseModel):
+    nonce: str
+    timestamp: int
+    salt: str
+
+
+class AuthVerifyRequest(BaseModel):
+    response: str
+    timestamp: int
+
+
+class AuthEnableRequest(BaseModel):
+    key_hash: str
+    key_salt: str
+
+
+class AuthDisableRequest(BaseModel):
+    response: str
+    timestamp: int
+
+
+class AuthResponse(BaseModel):
+    success: bool
+    message: str
+    token: Optional[str] = None
+    expires_in: Optional[int] = None

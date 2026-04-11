@@ -2,9 +2,19 @@ import Foundation
 
 final class APIClient {
     let baseURL: String
+    var authToken: String? {
+        didSet {
+            if let token = authToken {
+                UserDefaults.standard.set(token, forKey: "auth_token")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "auth_token")
+            }
+        }
+    }
 
     init(baseURL: String) {
         self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        self.authToken = UserDefaults.standard.string(forKey: "auth_token")
     }
 
     // MARK: - Generic JSON request
@@ -115,12 +125,20 @@ final class APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 30
+
+        if let token = authToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
         return request
     }
 
     private func validateResponse(_ response: URLResponse, data: Data? = nil) throws {
         guard let http = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
+        }
+        if http.statusCode == 401 {
+            throw APIError.unauthorized
         }
         if http.statusCode >= 400 {
             let message: String
@@ -137,12 +155,14 @@ final class APIClient {
 enum APIError: LocalizedError {
     case invalidURL
     case invalidResponse
+    case unauthorized
     case httpError(statusCode: Int, message: String)
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "无效的 URL"
         case .invalidResponse: return "服务器响应无效"
+        case .unauthorized: return "未授权访问，请重新登录"
         case .httpError(_, let message): return message
         }
     }

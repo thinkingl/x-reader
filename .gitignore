@@ -56,6 +56,9 @@ ios/*/xcuserdata/
 Thumbs.db
 *:Zone.Identifier
 
+# Logs
+logs/
+
 # Large model files
 *.safetensors
 *.bin

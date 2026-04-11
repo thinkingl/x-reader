@@ -1,19 +1,34 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Layout, Menu } from 'antd';
+import { Layout, Menu, Spin } from 'antd';
 import { BookOutlined, UnorderedListOutlined, SettingOutlined, AudioOutlined } from '@ant-design/icons';
 import BookList from './pages/BookList';
 import BookDetail from './pages/BookDetail';
 import TaskList from './pages/TaskList';
 import VoicePresets from './pages/VoicePresets';
 import Configuration from './pages/Configuration';
+import LoginPage from './pages/Login';
 import AudioPlayer, { AudioProvider } from './components/AudioPlayer';
+import { AuthProvider, useAuth } from './AuthContext';
 import './App.css';
 
 const { Header, Sider, Content } = Layout;
 
 function AppContent() {
   const location = useLocation();
+  const { isAuthEnabled, isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  if (isAuthEnabled && !isAuthenticated) {
+    return <LoginPage />;
+  }
 
   const menuItems = [
     { key: '/', icon: <BookOutlined />, label: <Link to="/">图书列表</Link> },
@@ -55,9 +70,11 @@ function AppContent() {
 function App() {
   return (
     <Router>
-      <AudioProvider>
-        <AppContent />
-      </AudioProvider>
+      <AuthProvider>
+        <AudioProvider>
+          <AppContent />
+        </AudioProvider>
+      </AuthProvider>
     </Router>
   );
 }

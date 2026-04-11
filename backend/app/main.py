@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -19,10 +19,13 @@ from app.schemas import (
     TaskCreate, TaskResponse, TaskList,
     VoicePresetCreate, VoicePresetUpdate, VoicePresetResponse, VoicePresetList,
     ConfigUpdate, ConfigResponse,
+    AuthStatusResponse, AuthChallengeResponse, AuthVerifyRequest,
+    AuthEnableRequest, AuthDisableRequest, AuthResponse,
 )
 from app.services.ebook_parser import get_parser
 from app.services.audio_converter import AudioConverter
 from app.services.task_queue import TaskQueue
+from app.services.auth import AuthManager, verify_jwt_token
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +40,48 @@ app.add_middleware(
 )
 
 task_queue = TaskQueue(max_workers=1)
+_global_auth_manager: Optional[AuthManager] = None
 
 LOCAL_MODEL_PATH = "/home/x/code/OmniVoice/models/OmniVoice"
 LOCAL_ASR_MODEL_PATH = "/home/x/code/OmniVoice/models/whisper-large-v3-turbo"
+
+
+def get_auth_manager(db: Session = Depends(get_db)) -> AuthManager:
+    global _global_auth_manager
+    if _global_auth_manager is None:
+        _global_auth_manager = AuthManager(db)
+    else:
+        _global_auth_manager.db = db
+    return _global_auth_manager
+
+
+def require_auth(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+    try:
+        am = get_auth_manager(db)
+        if not am.is_auth_enabled():
+            return True
+
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="未授权访问")
+
+        token = authorization[7:]
+        if not verify_jwt_token(token):
+            raise HTTPException(status_code=401, detail="Token 无效或已过期")
+
+        return True
+    except HTTPException:
+        raise
+    except (OperationalError, ProgrammingError):
+        # If database table doesn't exist yet, allow access
+        return True
+    except Exception as e:
+        # Log unexpected errors but allow access
+        logger.warning(f"Auth check failed: {e}")
+        return True
 
 
 @app.on_event("startup")
@@ -92,12 +134,46 @@ def shutdown():
     task_queue.shutdown()
 
 
+# Auth endpoints
+@app.get("/api/auth/status", response_model=AuthStatusResponse)
+def get_auth_status(db: Session = Depends(get_db)):
+    am = get_auth_manager(db)
+    return am.get_auth_status()
+
+
+@app.post("/api/auth/challenge", response_model=AuthChallengeResponse)
+def create_auth_challenge(db: Session = Depends(get_db)):
+    am = get_auth_manager(db)
+    return am.create_challenge()
+
+
+@app.post("/api/auth/verify", response_model=AuthResponse)
+def verify_auth(data: AuthVerifyRequest, db: Session = Depends(get_db)):
+    am = get_auth_manager(db)
+    return am.verify_login(data.response, data.timestamp)
+
+
+@app.post("/api/auth/enable", response_model=AuthResponse)
+def enable_auth(data: AuthEnableRequest, db: Session = Depends(get_db)):
+    am = get_auth_manager(db)
+    if am.is_auth_enabled():
+        return {"success": False, "message": "认证已启用"}
+    return am.enable_auth(data.key_hash, data.key_salt)
+
+
+@app.post("/api/auth/disable", response_model=AuthResponse)
+def disable_auth(data: AuthDisableRequest, db: Session = Depends(get_db)):
+    am = get_auth_manager(db)
+    return am.disable_auth(data.response, data.timestamp)
+
+
 @app.get("/api/books", response_model=BookList)
 def list_books(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
     db: Session = Depends(get_db),
+    _auth: bool = Depends(require_auth),
 ):
     query = db.query(Book)
     if search:
@@ -113,6 +189,7 @@ async def upload_book(
     title: Optional[str] = Form(None),
     author: Optional[str] = Form(None),
     db: Session = Depends(get_db),
+    _auth: bool = Depends(require_auth),
 ):
     ext = Path(file.filename).suffix.lower()
     if ext not in [".epub", ".pdf", ".txt"]:
@@ -163,7 +240,7 @@ async def upload_book(
 
 
 @app.get("/api/books/{book_id}", response_model=BookResponse)
-def get_book(book_id: int, db: Session = Depends(get_db)):
+def get_book(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(404, "Book not found")
@@ -171,7 +248,7 @@ def get_book(book_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/books/{book_id}")
-def delete_book(book_id: int, db: Session = Depends(get_db)):
+def delete_book(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(404, "Book not found")
@@ -196,13 +273,13 @@ def delete_book(book_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/books/{book_id}/chapters", response_model=List[ChapterResponse])
-def list_chapters(book_id: int, db: Session = Depends(get_db)):
+def list_chapters(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     chapters = db.query(Chapter).filter(Chapter.book_id == book_id).order_by(Chapter.chapter_number).all()
     return chapters
 
 
 @app.get("/api/chapters/{chapter_id}", response_model=ChapterResponse)
-def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
+def get_chapter(chapter_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
     if not chapter:
         raise HTTPException(404, "Chapter not found")
@@ -210,7 +287,7 @@ def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
 
 
 @app.patch("/api/chapters/{chapter_id}", response_model=ChapterResponse)
-def update_chapter(chapter_id: int, data: ChapterUpdate, db: Session = Depends(get_db)):
+def update_chapter(chapter_id: int, data: ChapterUpdate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
     if not chapter:
         raise HTTPException(404, "Chapter not found")
@@ -222,7 +299,7 @@ def update_chapter(chapter_id: int, data: ChapterUpdate, db: Session = Depends(g
 
 
 @app.post("/api/tasks", response_model=TaskResponse)
-def create_task(data: TaskCreate, db: Session = Depends(get_db)):
+def create_task(data: TaskCreate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     book = db.query(Book).filter(Book.id == data.book_id).first()
     if not book:
         raise HTTPException(404, "Book not found")
@@ -256,6 +333,7 @@ def list_tasks(
     status: Optional[str] = None,
     book_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    _auth: bool = Depends(require_auth),
 ):
     query = db.query(Task)
     if status:
@@ -268,7 +346,7 @@ def list_tasks(
 
 
 @app.post("/api/tasks/{task_id}/retry", response_model=TaskResponse)
-def retry_task(task_id: int, db: Session = Depends(get_db)):
+def retry_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(404, "Task not found")
@@ -290,7 +368,7 @@ def retry_task(task_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/tasks/{task_id}")
-def cancel_task(task_id: int, db: Session = Depends(get_db)):
+def cancel_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(404, "Task not found")
@@ -303,7 +381,7 @@ def cancel_task(task_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/tasks/{task_id}/progress")
-def get_task_progress(task_id: int, db: Session = Depends(get_db)):
+def get_task_progress(task_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(404, "Task not found")
@@ -329,7 +407,7 @@ def get_task_progress(task_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/audio/{book_id}/{chapter_id}")
-def download_audio(book_id: int, chapter_id: int, db: Session = Depends(get_db)):
+def download_audio(book_id: int, chapter_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     chapter = db.query(Chapter).filter(Chapter.id == chapter_id, Chapter.book_id == book_id).first()
     if not chapter or not chapter.audio_path:
         raise HTTPException(404, "Audio not found")
@@ -337,7 +415,7 @@ def download_audio(book_id: int, chapter_id: int, db: Session = Depends(get_db))
 
 
 @app.get("/api/audio/{book_id}/{chapter_id}/stream")
-def stream_audio(book_id: int, chapter_id: int, db: Session = Depends(get_db)):
+def stream_audio(book_id: int, chapter_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     chapter = db.query(Chapter).filter(Chapter.id == chapter_id, Chapter.book_id == book_id).first()
     if not chapter or not chapter.audio_path:
         raise HTTPException(404, "Audio not found")
@@ -367,7 +445,7 @@ def stream_audio(book_id: int, chapter_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/audio/{book_id}/zip")
-def download_book_audio_zip(book_id: int, db: Session = Depends(get_db)):
+def download_book_audio_zip(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(404, "Book not found")
@@ -397,7 +475,7 @@ def download_book_audio_zip(book_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/voice-presets", response_model=VoicePresetResponse)
-def create_voice_preset(data: VoicePresetCreate, db: Session = Depends(get_db)):
+def create_voice_preset(data: VoicePresetCreate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     if data.is_default:
         db.query(VoicePreset).filter(VoicePreset.is_default == True).update({"is_default": False})
     preset = VoicePreset(**data.dict())
@@ -408,13 +486,13 @@ def create_voice_preset(data: VoicePresetCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/api/voice-presets", response_model=VoicePresetList)
-def list_voice_presets(db: Session = Depends(get_db)):
+def list_voice_presets(db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     presets = db.query(VoicePreset).order_by(VoicePreset.created_at.desc()).all()
     return VoicePresetList(items=presets, total=len(presets))
 
 
 @app.get("/api/voice-presets/{preset_id}", response_model=VoicePresetResponse)
-def get_voice_preset(preset_id: int, db: Session = Depends(get_db)):
+def get_voice_preset(preset_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     preset = db.query(VoicePreset).filter(VoicePreset.id == preset_id).first()
     if not preset:
         raise HTTPException(404, "Preset not found")
@@ -422,7 +500,7 @@ def get_voice_preset(preset_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/api/voice-presets/{preset_id}", response_model=VoicePresetResponse)
-def update_voice_preset(preset_id: int, data: VoicePresetUpdate, db: Session = Depends(get_db)):
+def update_voice_preset(preset_id: int, data: VoicePresetUpdate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     preset = db.query(VoicePreset).filter(VoicePreset.id == preset_id).first()
     if not preset:
         raise HTTPException(404, "Preset not found")
@@ -439,7 +517,7 @@ def update_voice_preset(preset_id: int, data: VoicePresetUpdate, db: Session = D
 
 
 @app.delete("/api/voice-presets/{preset_id}")
-def delete_voice_preset(preset_id: int, db: Session = Depends(get_db)):
+def delete_voice_preset(preset_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     preset = db.query(VoicePreset).filter(VoicePreset.id == preset_id).first()
     if not preset:
         raise HTTPException(404, "Preset not found")
@@ -449,7 +527,7 @@ def delete_voice_preset(preset_id: int, db: Session = Depends(get_db)):
 
 
 @app.patch("/api/voice-presets/{preset_id}/set-default", response_model=VoicePresetResponse)
-def set_default_preset(preset_id: int, db: Session = Depends(get_db)):
+def set_default_preset(preset_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     preset = db.query(VoicePreset).filter(VoicePreset.id == preset_id).first()
     if not preset:
         raise HTTPException(404, "Preset not found")
@@ -464,6 +542,7 @@ def set_default_preset(preset_id: int, db: Session = Depends(get_db)):
 async def upload_reference_audio(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    _auth: bool = Depends(require_auth),
 ):
     """上传参考音频并使用ASR自动转录"""
     import uuid
@@ -564,7 +643,7 @@ async def upload_reference_audio(
 
 
 @app.get("/api/reference-audio/{filename}")
-def get_reference_audio(filename: str):
+def get_reference_audio(filename: str, _auth: bool = Depends(require_auth)):
     """获取参考音频文件"""
     file_path = f"data/reference/{filename}"
     if not os.path.exists(file_path):
@@ -608,7 +687,7 @@ def get_config(db: Session = Depends(get_db)):
 
 
 @app.put("/api/config", response_model=ConfigResponse)
-def update_config(data: ConfigUpdate, db: Session = Depends(get_db)):
+def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     update_data = data.dict(exclude_unset=True)
     for key, value in update_data.items():
         if value is not None:
@@ -635,6 +714,7 @@ async def test_tts(
     text: str = Form(...),
     voice_preset_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
+    _auth: bool = Depends(require_auth),
 ):
     """测试 TTS 配置，生成音频并返回"""
     import uuid
@@ -707,7 +787,7 @@ async def test_tts(
 
 
 @app.get("/api/config/test-audio/{filename}")
-def get_test_audio(filename: str):
+def get_test_audio(filename: str, _auth: bool = Depends(require_auth)):
     """获取测试音频文件"""
     file_path = f"data/audio/{filename}"
     if not os.path.exists(file_path):

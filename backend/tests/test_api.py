@@ -8,33 +8,8 @@ from app.main import app
 from app.database import get_db, init_db
 from app.models.database import Base
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest.fixture
-def client():
-    Base.metadata.create_all(bind=engine)
-    with TestClient(app) as c:
-        yield c
-    Base.metadata.drop_all(bind=engine)
+# Use fixtures from conftest.py
+# client fixture is defined in conftest.py
 
 
 def test_health_check(client):

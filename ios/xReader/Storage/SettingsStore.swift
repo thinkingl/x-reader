@@ -21,6 +21,9 @@ class SettingsStore {
 
     var isConnected: Bool = false
     var isCheckingConnection: Bool = false
+    var isAuthenticated: Bool = false
+    var isAuthEnabled: Bool = false
+    var isCheckingAuth: Bool = false
 
     @MainActor
     func checkConnection() async {
@@ -33,5 +36,26 @@ class SettingsStore {
             isConnected = false
         }
         isCheckingConnection = false
+    }
+
+    @MainActor
+    func checkAuthStatus() async {
+        isCheckingAuth = true
+        let client = makeAPIClient()
+        do {
+            let status: AuthStatusResponse = try await client.get("/api/auth/status")
+            isAuthEnabled = status.enabled
+            isAuthenticated = client.authToken != nil
+        } catch {
+            isAuthEnabled = false
+            isAuthenticated = false
+        }
+        isCheckingAuth = false
+    }
+
+    func logout() {
+        let client = makeAPIClient()
+        client.authToken = nil
+        isAuthenticated = false
     }
 }
