@@ -53,9 +53,10 @@ npm run build
 ```
 
 ### Architecture
-- API base URL: `http://localhost:8000` in `src/api.js`
+- API base URL: 相对路径（通过 Vite proxy 转发到后端）
 - Routes: `/` (books), `/books/:id`, `/tasks`, `/presets`, `/config`
 - Global audio player via React Context (`AudioProvider` in `src/components/AudioPlayer.jsx`)
+- Vite proxy: `/api/*` → `http://localhost:8000`（开发环境自动转发）
 
 ## iOS
 
@@ -76,6 +77,8 @@ xcodebuild -project ios/xReader.xcodeproj -scheme xReader -destination 'platform
 - 语音预设管理（设计/克隆/自动模式）+ ASR 自动转录
 - 13 个后端测试，iOS SwiftUI 客户端
 - 代码推送到 GitHub
+- 音频下载功能：按章节下载 + 整本书 zip 打包下载
+- 前端代理配置：Vite proxy 转发 API 请求
 
 ### Pending
 - 认证功能（Challenge-Response + JWT Token）

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
@@ -8,6 +8,7 @@ import shutil
 import zipfile
 import io
 import logging
+import urllib.parse
 from pathlib import Path
 from datetime import datetime
 
@@ -406,12 +407,65 @@ def get_task_progress(task_id: int, db: Session = Depends(get_db), _auth: bool =
     }
 
 
+@app.get("/api/audio/{book_id}/zip")
+def download_book_audio_zip(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+
+    chapters = db.query(Chapter).filter(
+        Chapter.book_id == book_id,
+        Chapter.audio_path.isnot(None)
+    ).order_by(Chapter.chapter_number).all()
+
+    if not chapters:
+        raise HTTPException(404, "No audio files found")
+
+    def generate_zip():
+        """生成器：流式生成zip文件"""
+        # 使用临时文件来构建zip
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+            tmp_path = tmp_file.name
+
+        try:
+            # 使用ZIP_STORED（不压缩）提高速度，mp3本身已压缩
+            with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_STORED) as zip_file:
+                for chapter in chapters:
+                    if os.path.exists(chapter.audio_path):
+                        ext = Path(chapter.audio_path).suffix
+                        arcname = f"{chapter.chapter_number:03d}_{chapter.title or chapter.id}{ext}"
+                        zip_file.write(chapter.audio_path, arcname)
+
+            # 流式读取并yield
+            with open(tmp_path, 'rb') as f:
+                while True:
+                    chunk = f.read(64 * 1024)  # 64KB chunks
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            # 清理临时文件
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    filename = urllib.parse.quote(f"{book.title}.zip")
+    return StreamingResponse(
+        generate_zip(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=utf-8''{filename}"
+        }
+    )
+
+
 @app.get("/api/audio/{book_id}/{chapter_id}")
 def download_audio(book_id: int, chapter_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     chapter = db.query(Chapter).filter(Chapter.id == chapter_id, Chapter.book_id == book_id).first()
     if not chapter or not chapter.audio_path:
         raise HTTPException(404, "Audio not found")
-    return FileResponse(chapter.audio_path, filename=f"{chapter.title or chapter_id}.wav")
+    ext = Path(chapter.audio_path).suffix
+    return FileResponse(chapter.audio_path, filename=f"{chapter.title or chapter_id}{ext}")
 
 
 @app.get("/api/audio/{book_id}/{chapter_id}/stream")
@@ -441,36 +495,6 @@ def stream_audio(book_id: int, chapter_id: int, db: Session = Depends(get_db), _
             "Accept-Ranges": "bytes",
             "Cache-Control": "public, max-age=3600",
         }
-    )
-
-
-@app.get("/api/audio/{book_id}/zip")
-def download_book_audio_zip(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
-    book = db.query(Book).filter(Book.id == book_id).first()
-    if not book:
-        raise HTTPException(404, "Book not found")
-
-    chapters = db.query(Chapter).filter(
-        Chapter.book_id == book_id,
-        Chapter.audio_path.isnot(None)
-    ).order_by(Chapter.chapter_number).all()
-
-    if not chapters:
-        raise HTTPException(404, "No audio files found")
-
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for chapter in chapters:
-            if os.path.exists(chapter.audio_path):
-                ext = Path(chapter.audio_path).suffix
-                arcname = f"{chapter.chapter_number:03d}_{chapter.title or chapter.id}{ext}"
-                zip_file.write(chapter.audio_path, arcname)
-
-    zip_buffer.seek(0)
-    return FileResponse(
-        zip_buffer,
-        media_type="application/zip",
-        filename=f"{book.title}.zip",
     )
 
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { Table, Button, Select, message, Space, Tag, Card, Descriptions, Tooltip, Progress } from 'antd';
-import { PlayCircleOutlined, ReloadOutlined, AudioOutlined, SyncOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, ReloadOutlined, AudioOutlined, SyncOutlined, ClockCircleOutlined, DownloadOutlined } from '@ant-design/icons';
 import api from '../api';
 import { AudioContext } from '../components/AudioPlayer';
 
@@ -12,6 +12,8 @@ function BookDetail() {
   const [presets, setPresets] = useState([]);
   const [selectedPreset, setSelectedPreset] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [downloadingZip, setDownloadingZip] = useState(false);
+  const [downloadingChapter, setDownloadingChapter] = useState(null);
   const [taskProgress, setTaskProgress] = useState({});  // {taskId: {message, elapsed}}
   const { playAudio } = useContext(AudioContext);
   const progressInterval = useRef(null);
@@ -120,11 +122,41 @@ function BookDetail() {
   const handlePlay = (chapter) => {
     if (chapter.audio_path) {
       playAudio({
-        url: `${api.defaults.baseURL}/api/audio/${id}/${chapter.id}/stream`,
+        url: `/api/audio/${id}/${chapter.id}/stream`,
         title: chapter.title,
         bookTitle: book?.title,
       });
     }
+  };
+
+  const handleDownloadChapter = (chapter) => {
+    setDownloadingChapter(chapter.id);
+    const url = `/api/audio/${id}/${chapter.id}`;
+    // 使用隐藏iframe触发下载，不影响当前页面
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    // 3秒后移除iframe并清除状态
+    setTimeout(() => {
+      document.body.removeChild(iframe);
+      setDownloadingChapter(null);
+    }, 3000);
+  };
+
+  const handleDownloadBook = () => {
+    setDownloadingZip(true);
+    const url = `/api/audio/${id}/zip`;
+    // 使用隐藏iframe触发下载
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    // 5秒后移除iframe并清除状态
+    setTimeout(() => {
+      document.body.removeChild(iframe);
+      setDownloadingZip(false);
+    }, 5000);
   };
 
   const formatElapsed = (seconds) => {
@@ -217,6 +249,15 @@ function BookDetail() {
               <Button
                 size="small"
                 type="link"
+                icon={<DownloadOutlined />}
+                onClick={() => handleDownloadChapter(record)}
+                loading={downloadingChapter === record.id}
+              >
+                下载
+              </Button>
+              <Button
+                size="small"
+                type="link"
                 icon={<ReloadOutlined />}
                 onClick={() => handleConvert(record.id)}
               >
@@ -273,6 +314,14 @@ function BookDetail() {
           转换全部未完成章节
         </Button>
         <Button onClick={() => fetchChapters()}>刷新</Button>
+        <Button
+          icon={<DownloadOutlined />}
+          onClick={handleDownloadBook}
+          loading={downloadingZip}
+          disabled={!chapters.some(c => c.status === 'completed')}
+        >
+          下载全部音频
+        </Button>
       </div>
 
       <Table

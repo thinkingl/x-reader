@@ -60,6 +60,9 @@ struct BookDetailView: View {
                         onConvert: {
                             Task { await convertChapters([chapter]) }
                         },
+                        onDownload: {
+                            Task { await downloadChapter(chapter) }
+                        },
                         baseURL: client.baseURL
                     )
                 }
@@ -67,11 +70,21 @@ struct BookDetailView: View {
         }
         .navigationTitle(book?.title ?? "图书详情")
         .toolbar {
-            if !selectedChapterIds.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("转换选中 (\(selectedChapterIds.count))") {
-                        let selected = chapters.filter { selectedChapterIds.contains($0.id) }
-                        Task { await convertChapters(selected) }
+            ToolbarItem(placement: .primaryAction) {
+                HStack {
+                    if !selectedChapterIds.isEmpty {
+                        Button("转换选中 (\(selectedChapterIds.count))") {
+                            let selected = chapters.filter { selectedChapterIds.contains($0.id) }
+                            Task { await convertChapters(selected) }
+                        }
+                    }
+                    
+                    if chapters.contains(where: { $0.status == "completed" }) {
+                        Button {
+                            Task { await downloadBookAudio() }
+                        } label: {
+                            Image(systemName: "arrow.down.circle")
+                        }
                     }
                 }
             }
@@ -142,10 +155,84 @@ struct BookDetailView: View {
         }
     }
 
+    private func downloadBookAudio() async {
+        let url = client.baseURL + APIEndpoints.audioZip(bookId: bookId)
+        guard let downloadURL = URL(string: url) else { return }
+
+        let task = URLSession.shared.downloadTask(with: downloadURL) { localURL, response, error in
+            guard let localURL = localURL, error == nil else {
+                DispatchQueue.main.async {
+                    errorMessage = "下载失败: \(error?.localizedDescription ?? "未知错误")"
+                }
+                return
+            }
+
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let destinationURL = documentsPath.appendingPathComponent("\(book?.title ?? "book").zip")
+
+            do {
+                if FileManager.default.fileExists(atPath: destinationURL.path) {
+                    try FileManager.default.removeItem(at: destinationURL)
+                }
+                try FileManager.default.moveItem(at: localURL, to: destinationURL)
+                DispatchQueue.main.async {
+                    errorMessage = "下载完成: \(destinationURL.lastPathComponent)"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    errorMessage = "保存失败: \(error.localizedDescription)"
+                }
+            }
+        }
+        task.resume()
+    }
+
     private func playChapter(_ chapter: ChapterResponse) async {
         let url = client.baseURL + APIEndpoints.audioStream(bookId: bookId, chapterId: chapter.id)
         guard let audioURL = URL(string: url) else { return }
         player.play(url: audioURL, title: chapter.title ?? "第\(chapter.chapter_number)章", bookTitle: book?.title ?? "")
+    }
+
+    private func downloadChapter(_ chapter: ChapterResponse) async {
+        let url = client.baseURL + APIEndpoints.audioDownload(bookId: bookId, chapterId: chapter.id)
+        guard let downloadURL = URL(string: url) else { return }
+
+        let task = URLSession.shared.downloadTask(with: downloadURL) { localURL, response, error in
+            guard let localURL = localURL, error == nil else {
+                DispatchQueue.main.async {
+                    errorMessage = "下载失败: \(error?.localizedDescription ?? "未知错误")"
+                }
+                return
+            }
+
+            // 从响应头获取文件名，或使用默认扩展名
+            var fileExtension = ".mp3"
+            if let httpResponse = response as? HTTPURLResponse,
+               let contentDisposition = httpResponse.allHeaderFields["Content-Disposition"] as? String {
+                // 尝试从Content-Disposition头解析文件名
+                if let filename = contentDisposition.components(separatedBy: "filename=").last?.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) {
+                    fileExtension = (filename as NSString).pathExtension.isEmpty ? ".mp3" : ".\((filename as NSString).pathExtension)"
+                }
+            }
+
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let destinationURL = documentsPath.appendingPathComponent("\(chapter.title ?? "第\(chapter.chapter_number)章")\(fileExtension)")
+
+            do {
+                if FileManager.default.fileExists(atPath: destinationURL.path) {
+                    try FileManager.default.removeItem(at: destinationURL)
+                }
+                try FileManager.default.moveItem(at: localURL, to: destinationURL)
+                DispatchQueue.main.async {
+                    errorMessage = "下载完成: \(destinationURL.lastPathComponent)"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    errorMessage = "保存失败: \(error.localizedDescription)"
+                }
+            }
+        }
+        task.resume()
     }
 }
 
@@ -155,6 +242,7 @@ struct ChapterRow: View {
     let onTap: () -> Void
     let onPlay: () -> Void
     let onConvert: () -> Void
+    let onDownload: () -> Void
     let baseURL: String
 
     var body: some View {
@@ -187,6 +275,13 @@ struct ChapterRow: View {
                         Image(systemName: "play.circle.fill")
                             .font(.title2)
                             .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button { onDownload() } label: {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.green)
                     }
                     .buttonStyle(.plain)
                 }

@@ -324,7 +324,7 @@ function Configuration() {
                 </div>
                 <audio
                   ref={audioRef}
-                  src={`${api.defaults.baseURL}${testResult.audio_url}`}
+                  src={testResult.audio_url}
                   onEnded={() => setIsPlaying(false)}
                   controls
                   style={{ width: '100%' }}
