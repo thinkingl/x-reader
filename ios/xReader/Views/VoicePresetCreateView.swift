@@ -162,8 +162,8 @@ struct VoicePresetCreateView: View {
             } message: {
                 if let msg = error { Text(msg) }
             }
-            .onChange(of: recorder.recordedURL) { url in
-                if let url {
+            .onChange(of: recorder.recordedURL) { _ in
+                if let url = recorder.recordedURL {
                     Task { await uploadReferenceAudio(fileURL: url) }
                 }
             }
