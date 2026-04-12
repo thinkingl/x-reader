@@ -32,9 +32,7 @@ struct BookListView: View {
             )) {
                 Button("确定") { errorMessage = nil }
             } message: {
-                if let msg = errorMessage {
-                    Text(msg)
-                }
+                if let msg = errorMessage { Text(msg) }
             }
             .sheet(isPresented: $showingUpload) {
                 EBookPicker { url in
@@ -43,7 +41,7 @@ struct BookListView: View {
                 }
             }
             .task { await loadBooks() }
-            .onChange(of: searchText) { _, _ in
+            .onChange(of: searchText) { _ in
                 Task { await loadBooks() }
             }
             .refreshable { await loadBooks() }
@@ -52,7 +50,7 @@ struct BookListView: View {
     @ViewBuilder
     private var content: some View {
         if books.isEmpty && !isLoading {
-            ContentUnavailableView("暂无图书", systemImage: "book.closed", description: Text("点击右上角 + 上传电子书"))
+            EmptyPlaceholderView(title: "暂无图书", systemImage: "book.closed", description: "点击右上角 + 上传电子书")
         } else {
             List(books) { book in
                 let detail = BookDetailView(client: client, player: player, bookId: book.id)

@@ -13,7 +13,7 @@ struct BookDetailView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var convertingAll = false
-    @State private var polling = TaskPollingService()
+    @StateObject private var polling = TaskPollingService()
 
     var body: some View {
         List {
@@ -131,7 +131,6 @@ struct BookDetailView: View {
             )
             let _: TaskResponse = try await client.post(APIEndpoints.tasks, body: body)
             polling.startPolling(client: client, bookId: bookId)
-            // Refresh chapters periodically
             try? await Task.sleep(for: .seconds(2))
             await loadData()
         } catch let e {

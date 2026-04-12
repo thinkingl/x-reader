@@ -1,4 +1,5 @@
 import SwiftUI
+import CommonCrypto
 
 struct ConfigView: View {
     let client: APIClient
@@ -253,5 +254,3 @@ struct ConfigView: View {
         return hash.map { String(format: "%02x", $0) }.joined()
     }
 }
-
-import CommonCrypto

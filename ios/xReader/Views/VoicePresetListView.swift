@@ -36,7 +36,7 @@ struct VoicePresetListView: View {
         }
         .overlay {
             if presets.isEmpty && !isLoading {
-                ContentUnavailableView("暂无预设", systemImage: "waveform", description: Text("点击 + 创建语音预设"))
+                EmptyPlaceholderView(title: "暂无预设", systemImage: "waveform", description: "点击 + 创建语音预设")
             }
         }
         .task { await loadPresets() }

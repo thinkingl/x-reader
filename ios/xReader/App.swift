@@ -2,8 +2,8 @@ import SwiftUI
 
 @main
 struct XReaderApp: App {
-    @State private var settings = SettingsStore()
-    @State private var player = AudioPlayerService()
+    @StateObject private var settings = SettingsStore()
+    @StateObject private var player = AudioPlayerService()
 
     var body: some Scene {
         WindowGroup {
@@ -25,7 +25,7 @@ struct XReaderApp: App {
 }
 
 struct ConnectionSetupView: View {
-    let settings: SettingsStore
+    @ObservedObject var settings: SettingsStore
 
     @State private var url = ""
     @State private var showError = false

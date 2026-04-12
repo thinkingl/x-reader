@@ -53,7 +53,7 @@ struct TaskListView: View {
                 ProgressView()
             }
             if tasks.isEmpty && !isLoading {
-                ContentUnavailableView("暂无任务", systemImage: "list.bullet.rectangle")
+                EmptyPlaceholderView(title: "暂无任务", systemImage: "list.bullet.rectangle")
             }
         }
         .task { await loadTasks() }

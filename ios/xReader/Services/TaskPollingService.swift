@@ -1,10 +1,9 @@
 import Foundation
 import SwiftUI
 
-@Observable
-class TaskPollingService {
-    var activeTasks: [Int: TaskProgress] = [:]
-    var isPolling = false
+class TaskPollingService: ObservableObject {
+    @Published var activeTasks: [Int: TaskProgress] = [:]
+    @Published var isPolling = false
 
     private var pollingTask: Task<Void, Never>?
 

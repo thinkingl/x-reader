@@ -50,6 +50,7 @@ test_books/
 ios/.build/
 ios/*/xcuserdata/
 *.xcuserstate
+_build/
 
 # OS
 .DS_Store

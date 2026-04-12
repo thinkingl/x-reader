@@ -7,7 +7,7 @@ struct VoicePresetCreateView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
-    @State private var voiceMode = "design"
+    @State private var voiceMode = "clone"
     @State private var instruct = ""
     @State private var language = ""
     @State private var numStep = 32
@@ -18,8 +18,10 @@ struct VoicePresetCreateView: View {
     @State private var error: String?
     @State private var showingAudioPicker = false
     @State private var refAudioPath: String?
+    @State private var isUploading = false
+    @StateObject private var recorder = AudioRecorder()
 
-    private let voiceModes = ["design", "clone", "auto"]
+    private let voiceModes = ["clone", "design", "auto"]
 
     var body: some View {
         NavigationStack {
@@ -43,11 +45,73 @@ struct VoicePresetCreateView: View {
 
                 if voiceMode == "clone" {
                     Section("语音克隆") {
-                        Button {
-                            showingAudioPicker = true
-                        } label: {
-                            Label(refAudioPath != nil ? "已选择参考音频" : "上传参考音频", systemImage: "waveform")
+                        VStack(spacing: 12) {
+                            // Upload or record buttons
+                            HStack(spacing: 12) {
+                                Button {
+                                    showingAudioPicker = true
+                                } label: {
+                                    Label("选择文件", systemImage: "doc.badge.plus")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+
+                                if recorder.isRecording {
+                                    Button {
+                                        recorder.stopRecording()
+                                    } label: {
+                                        Label(String(format: "%.0fs", recorder.recordingTime), systemImage: "stop.circle.fill")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.red)
+                                } else {
+                                    Button {
+                                        recorder.startRecording()
+                                    } label: {
+                                        Label("录音 10s", systemImage: "mic.circle.fill")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+
+                            // Recording progress
+                            if recorder.isRecording {
+                                VStack(spacing: 4) {
+                                    ProgressView(value: recorder.recordingTime, total: 10.0)
+                                        .tint(.red)
+                                    Text("录音中... \(String(format: "%.1f", recorder.recordingTime))/10.0s")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+
+                            // Status indicator
+                            if isUploading {
+                                HStack {
+                                    ProgressView()
+                                    Text("上传中...")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } else if refAudioPath != nil {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                    Text("参考音频已上传")
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                    Spacer()
+                                    Button("清除") {
+                                        refAudioPath = nil
+                                        recorder.recordedURL = nil
+                                    }
+                                    .font(.caption)
+                                }
+                            }
                         }
+
                         TextField("参考文本", text: $refText, axis: .vertical)
                             .lineLimit(3...6)
                     }
@@ -90,13 +154,18 @@ struct VoicePresetCreateView: View {
                     Task { await uploadReferenceAudio(fileURL: url) }
                 }
             }
-            .alert("错误", isPresented: .init(
+            .alert("错误", isPresented: Binding(
                 get: { error != nil },
                 set: { if !$0 { error = nil } }
             )) {
                 Button("确定") { error = nil }
             } message: {
-                Text(error ?? "")
+                if let msg = error { Text(msg) }
+            }
+            .onChange(of: recorder.recordedURL) { url in
+                if let url {
+                    Task { await uploadReferenceAudio(fileURL: url) }
+                }
             }
         }
     }
@@ -119,12 +188,14 @@ struct VoicePresetCreateView: View {
             )
             let _: VoicePresetResponse = try await client.post(APIEndpoints.voicePresets, body: body)
             onSave()
-        } catch {
-            self.error = "保存失败: \(error.localizedDescription)"
+        } catch let e {
+            self.error = "保存失败: \(e.localizedDescription)"
         }
     }
 
     private func uploadReferenceAudio(fileURL: URL) async {
+        isUploading = true
+        defer { isUploading = false }
         do {
             let data = try await client.uploadFile(
                 path: APIEndpoints.uploadReference,
@@ -136,15 +207,15 @@ struct VoicePresetCreateView: View {
             if !result.transcribed_text.isEmpty {
                 refText = result.transcribed_text
             }
-        } catch {
-            self.error = "上传失败: \(error.localizedDescription)"
+        } catch let e {
+            self.error = "上传失败: \(e.localizedDescription)"
         }
     }
 
     private func modeLabel(_ mode: String) -> String {
         switch mode {
-        case "design": return "语音设计"
         case "clone": return "语音克隆"
+        case "design": return "语音设计"
         case "auto": return "自动语音"
         default: return mode
         }

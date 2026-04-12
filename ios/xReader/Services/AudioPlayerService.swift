@@ -3,13 +3,12 @@ import Foundation
 import MediaPlayer
 import SwiftUI
 
-@Observable
-final class AudioPlayerService: NSObject {
-    var isPlaying = false
-    var currentTime: Double = 0
-    var duration: Double = 0
-    var currentTitle: String = ""
-    var currentBookTitle: String = ""
+class AudioPlayerService: NSObject, ObservableObject {
+    @Published var isPlaying = false
+    @Published var currentTime: Double = 0
+    @Published var duration: Double = 0
+    @Published var currentTitle: String = ""
+    @Published var currentBookTitle: String = ""
 
     private var player: AVPlayer?
     private var timeObserver: Any?

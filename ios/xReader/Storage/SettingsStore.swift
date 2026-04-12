@@ -1,15 +1,20 @@
 import Foundation
 import SwiftUI
 
-@Observable
-class SettingsStore {
+class SettingsStore: ObservableObject {
     static let serverURLKey = "serverURL"
 
-    var serverURL: String {
+    @Published var serverURL: String {
         didSet {
             UserDefaults.standard.set(serverURL, forKey: Self.serverURLKey)
         }
     }
+
+    @Published var isConnected: Bool = false
+    @Published var isCheckingConnection: Bool = false
+    @Published var isAuthenticated: Bool = false
+    @Published var isAuthEnabled: Bool = false
+    @Published var isCheckingAuth: Bool = false
 
     init() {
         self.serverURL = UserDefaults.standard.string(forKey: Self.serverURLKey) ?? "http://localhost:8000"
@@ -18,12 +23,6 @@ class SettingsStore {
     func makeAPIClient() -> APIClient {
         APIClient(baseURL: serverURL)
     }
-
-    var isConnected: Bool = false
-    var isCheckingConnection: Bool = false
-    var isAuthenticated: Bool = false
-    var isAuthEnabled: Bool = false
-    var isCheckingAuth: Bool = false
 
     @MainActor
     func checkConnection() async {

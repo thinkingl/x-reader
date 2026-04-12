@@ -47,5 +47,7 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>需要使用麦克风录制参考音频用于语音克隆</string>
 </dict>
 </plist>
