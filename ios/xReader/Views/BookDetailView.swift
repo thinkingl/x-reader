@@ -39,7 +39,7 @@ struct BookDetailView: View {
 
             Section {
                 Button {
-                    Task { await convertChapters(Array(chapters)) }
+                    Task { await convertChapters(Array(chapters), skipCompleted: true) }
                 } label: {
                     Label(convertingAll ? "转换中..." : "转换全部未完成章节", systemImage: "play.rectangle.fill")
                 }
@@ -118,16 +118,16 @@ struct BookDetailView: View {
         }
     }
 
-    private func convertChapters(_ chapters: [ChapterResponse]) async {
+    private func convertChapters(_ chapters: [ChapterResponse], skipCompleted: Bool = false) async {
         convertingAll = true
         defer { convertingAll = false }
         do {
-            let pending = chapters.filter { $0.status != "completed" }
-            guard !pending.isEmpty else {
-                errorMessage = "没有需要转换的章节"
+            let target = skipCompleted ? chapters.filter { $0.status != "completed" } : chapters
+            guard !target.isEmpty else {
+                errorMessage = skipCompleted ? "没有需要转换的章节" : "请选择章节"
                 return
             }
-            let pendingIds = pending.map { $0.id }
+            let targetIds = target.map { $0.id }
             let body = TaskCreate(
                 book_id: bookId,
                 chapter_ids: pendingIds,
