@@ -375,9 +375,9 @@ def cancel_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depen
     if task.status == TaskStatus.RUNNING:
         raise HTTPException(400, "Cannot cancel running task")
 
-    task.status = TaskStatus.SKIPPED
+    db.delete(task)
     db.commit()
-    return {"message": "Task cancelled"}
+    return {"message": "Task deleted"}
 
 
 @app.get("/api/tasks/{task_id}/progress")

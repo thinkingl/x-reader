@@ -123,6 +123,10 @@ struct BookDetailView: View {
         defer { convertingAll = false }
         do {
             let pending = chapters.filter { $0.status != "completed" }
+            guard !pending.isEmpty else {
+                errorMessage = "没有需要转换的章节"
+                return
+            }
             let pendingIds = pending.map { $0.id }
             let body = TaskCreate(
                 book_id: bookId,
