@@ -18,7 +18,14 @@ struct VoicePresetEditView: View {
     @State private var isSaving = false
     @State private var error: String?
 
-    private let voiceModes = ["design", "clone", "auto"]
+    // Test state
+    @State private var testText = "这是一段测试语音，用于验证当前预设的效果。"
+    @State private var isTesting = false
+    @State private var testResult: TestAudioResult?
+    @State private var testMessage: String?
+    @StateObject private var player = AudioPlayerService()
+
+    private let voiceModes = ["clone", "design", "auto"]
 
     init(client: APIClient, preset: VoicePresetResponse, onSave: @escaping () -> Void) {
         self.client = client
@@ -80,6 +87,71 @@ struct VoicePresetEditView: View {
                         .frame(width: 36)
                 }
             }
+
+            Section("测试预设效果") {
+                TextField("测试文本", text: $testText, axis: .vertical)
+                    .lineLimit(2...4)
+
+                HStack(spacing: 12) {
+                    Button {
+                        Task { await testPreset() }
+                    } label: {
+                        Label(isTesting ? "生成中..." : "生成语音", systemImage: "waveform.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(testText.isEmpty || isTesting)
+                }
+
+                if let msg = testMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let result = testResult, result.success {
+                    HStack {
+                        Text(String(format: "时长: %.1f 秒", result.duration))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Button {
+                            Task { await playTestAudio(result: result) }
+                        } label: {
+                            Label(player.isPlaying ? "播放中" : "播放", systemImage: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        }
+                        .buttonStyle(.bordered)
+
+                        if player.isPlaying {
+                            Button {
+                                player.stop()
+                            } label: {
+                                Image(systemName: "stop.circle.fill")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+
+                    if player.isPlaying {
+                        VStack(spacing: 4) {
+                            ProgressView(value: player.currentTime, total: max(player.duration, 1))
+                                .tint(.blue)
+                            HStack {
+                                Text(formatTime(player.currentTime))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(formatTime(player.duration))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
         }
         .navigationTitle("编辑预设")
         .toolbar {
@@ -88,14 +160,59 @@ struct VoicePresetEditView: View {
                     .disabled(name.isEmpty || isSaving)
             }
         }
-        .alert("错误", isPresented: .init(
+        .alert("错误", isPresented: Binding(
             get: { error != nil },
             set: { if !$0 { error = nil } }
         )) {
             Button("确定") { error = nil }
         } message: {
-            Text(error ?? "")
+            if let msg = error { Text(msg) }
         }
+    }
+
+    private func testPreset() async {
+        isTesting = true
+        testResult = nil
+        testMessage = nil
+        defer { isTesting = false }
+        do {
+            let boundary = UUID().uuidString
+            var request = URLRequest(url: URL(string: client.baseURL + APIEndpoints.configTest)!)
+            request.httpMethod = "POST"
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            if let token = client.authToken {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+
+            var body = Data()
+            let fields: [(String, String)] = [
+                ("text", testText),
+                ("voice_preset_id", String(preset.id)),
+            ]
+            for (key, value) in fields {
+                body.append("--\(boundary)\r\n".data(using: .utf8)!)
+                body.append("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n".data(using: .utf8)!)
+                body.append("\(value)\r\n".data(using: .utf8)!)
+            }
+            body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+            request.httpBody = body
+
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let result = try JSONDecoder().decode(TestAudioResult.self, from: data)
+            testResult = result
+            testMessage = result.message
+        } catch let e {
+            testMessage = "生成失败: \(e.localizedDescription)"
+        }
+    }
+
+    private func playTestAudio(result: TestAudioResult) async {
+        guard let audioURL = result.audio_url,
+              let url = URL(string: client.baseURL + audioURL) else {
+            testMessage = "无效的音频地址"
+            return
+        }
+        player.play(url: url, title: testText, bookTitle: preset.name)
     }
 
     private func save() async {
@@ -117,17 +234,30 @@ struct VoicePresetEditView: View {
             let _: VoicePresetResponse = try await client.put(APIEndpoints.voicePreset(preset.id), body: body)
             onSave()
             dismiss()
-        } catch {
-            self.error = "保存失败: \(error.localizedDescription)"
+        } catch let e {
+            self.error = "保存失败: \(e.localizedDescription)"
         }
     }
 
     private func modeLabel(_ mode: String) -> String {
         switch mode {
-        case "design": return "语音设计"
         case "clone": return "语音克隆"
+        case "design": return "语音设计"
         case "auto": return "自动语音"
         default: return mode
         }
     }
+
+    private func formatTime(_ seconds: Double) -> String {
+        let m = Int(seconds) / 60
+        let s = Int(seconds) % 60
+        return String(format: "%d:%02d", m, s)
+    }
+}
+
+private struct TestAudioResult: Codable {
+    let success: Bool
+    let audio_url: String?
+    let duration: Double
+    let message: String
 }
