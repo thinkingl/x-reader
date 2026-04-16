@@ -198,6 +198,7 @@ async def upload_book(
 
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}
     book_dir = configs.get("book_dir", "data/books")
+    audio_dir = configs.get("audio_dir", "data/audio")
 
     book_id = db.query(Book).count() + 1
     file_path = os.path.join(book_dir, str(book_id), file.filename)
@@ -226,6 +227,10 @@ async def upload_book(
     db.commit()
     db.refresh(book)
 
+    # 创建文本输出目录
+    text_dir = os.path.join("data/text", str(book.id))
+    os.makedirs(text_dir, exist_ok=True)
+
     for ch_data in result["chapters"]:
         chapter = Chapter(
             book_id=book.id,
@@ -235,6 +240,15 @@ async def upload_book(
             word_count=ch_data["word_count"],
         )
         db.add(chapter)
+
+        # 写入文本文件，文件名格式与音频一致
+        safe_title = re.sub(r'[《》（）\(\)、，,\s]', '', ch_data["title"] or f"Chapter{ch_data['chapter_number']}")
+        safe_title = safe_title[:50]
+        text_filename = f"{ch_data['chapter_number']:03d}_{safe_title}.txt"
+        text_path = os.path.join(text_dir, text_filename)
+        with open(text_path, "w", encoding="utf-8") as f:
+            f.write(ch_data["text_content"])
+
     db.commit()
 
     return book

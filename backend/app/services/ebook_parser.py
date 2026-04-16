@@ -97,12 +97,17 @@ class EpubParser:
 
                     if text and len(text) > 10:
                         chapter_num += 1
+                        # 优先从h1/h2/h3获取标题
                         title_tag = soup.find(["h1", "h2", "h3"])
-                        chapter_title = (
-                            title_tag.get_text(strip=True)
-                            if title_tag
-                            else f"Chapter {chapter_num}"
-                        )
+                        if title_tag:
+                            chapter_title = title_tag.get_text(strip=True)
+                        else:
+                            # 尝试从<title>标签获取
+                            html_title_tag = soup.find("title")
+                            if html_title_tag and html_title_tag.string:
+                                chapter_title = html_title_tag.string.strip()
+                            else:
+                                chapter_title = f"Chapter {chapter_num}"
 
                         chapters.append(
                             {
@@ -126,12 +131,17 @@ class EpubParser:
 
                     if text and len(text) > 10:
                         chapter_num += 1
+                        # 优先从h1/h2/h3获取标题
                         title_tag = soup.find(["h1", "h2", "h3"])
-                        chapter_title = (
-                            title_tag.get_text(strip=True)
-                            if title_tag
-                            else f"Chapter {chapter_num}"
-                        )
+                        if title_tag:
+                            chapter_title = title_tag.get_text(strip=True)
+                        else:
+                            # 尝试从<title>标签获取
+                            html_title_tag = soup.find("title")
+                            if html_title_tag and html_title_tag.string:
+                                chapter_title = html_title_tag.string.strip()
+                            else:
+                                chapter_title = f"Chapter {chapter_num}"
 
                         chapters.append(
                             {
