@@ -12,7 +12,8 @@ struct BookDetailView: View {
     @State private var selectedChapterIds: Set<Int> = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var convertingAll = false
+    @State private var isConverting = false
+    @State private var convertingChapterIds: Set<Int> = []
     @StateObject private var polling = TaskPollingService()
 
     var body: some View {
@@ -39,11 +40,11 @@ struct BookDetailView: View {
 
             Section {
                 Button {
-                    Task { await convertChapters(Array(chapters)) }
+                    Task { await convertChapters(Array(chapters), skipCompleted: true) }
                 } label: {
-                    Label(convertingAll ? "转换中..." : "转换全部未完成章节", systemImage: "play.rectangle.fill")
+                    Label(isConverting ? "转换中..." : "转换全部未完成章节", systemImage: "play.rectangle.fill")
                 }
-                .disabled(convertingAll || chapters.allSatisfy { $0.status == "completed" })
+                .disabled(isConverting || chapters.allSatisfy { $0.status == "completed" })
             }
 
             Section("章节 (\(chapters.count))") {
@@ -51,6 +52,8 @@ struct BookDetailView: View {
                     ChapterRow(
                         chapter: chapter,
                         isSelected: selectedChapterIds.contains(chapter.id),
+                        isConverting: convertingChapterIds.contains(chapter.id),
+                        progress: progressForChapter(chapter.id),
                         onTap: {
                             toggleSelection(chapter.id)
                         },
@@ -120,7 +123,7 @@ struct BookDetailView: View {
         do {
             async let bookResult: BookResponse = client.get(APIEndpoints.book(bookId))
             async let chaptersResult: [ChapterResponse] = client.get(APIEndpoints.chapters(bookId: bookId))
-            async let presetsResult: VoicePresetList = client.get(APIEndpoints.voicePresets)
+            async let presetsResult: VoicePresetList = try await client.get(APIEndpoints.voicePresets)
 
             let (b, ch, pr) = try await (bookResult, chaptersResult, presetsResult)
             book = b
@@ -131,27 +134,76 @@ struct BookDetailView: View {
         }
     }
 
-    private func convertChapters(_ chapters: [ChapterResponse]) async {
-        convertingAll = true
-        defer { convertingAll = false }
+    private func progressForChapter(_ chapterId: Int) -> TaskProgress? {
+        for (_, progress) in polling.activeTasks {
+            if progress.message.contains("#\(chapterId)") || progress.task_id == chapterId {
+                return progress
+            }
+        }
+        return nil
+    }
+
+    private func convertChapters(_ chapters: [ChapterResponse], skipCompleted: Bool = false) async {
+        isConverting = true
+        defer { isConverting = false }
         do {
-            let pending = chapters.filter { $0.status != "completed" }
-            guard !pending.isEmpty else {
-                errorMessage = "没有需要转换的章节"
+            let target = skipCompleted ? chapters.filter { $0.status != "completed" } : chapters
+            guard !target.isEmpty else {
+                errorMessage = skipCompleted ? "没有需要转换的章节" : "请选择章节"
                 return
             }
-            let pendingIds = pending.map { $0.id }
+            let targetIds = target.map { $0.id }
+            convertingChapterIds = Set(targetIds)
+
             let body = TaskCreate(
                 book_id: bookId,
-                chapter_ids: pendingIds,
+                chapter_ids: targetIds,
                 voice_preset_id: selectedPresetId
             )
             let _: TaskResponse = try await client.post(APIEndpoints.tasks, body: body)
+
+            // Start polling and wait until all tasks finish
             polling.startPolling(client: client, bookId: bookId)
-            try? await Task.sleep(for: .seconds(2))
+            await waitForCompletion()
+            polling.stop()
+            convertingChapterIds.removeAll()
+
             await loadData()
         } catch let e {
             self.errorMessage = "转换失败: \(e.localizedDescription)"
+            polling.stop()
+            convertingChapterIds.removeAll()
+        }
+    }
+
+    private func waitForCompletion() async {
+        // Poll until no running tasks remain for this book
+        while true {
+            do {
+                let taskList: TaskList = try await client.get(
+                    APIEndpoints.tasks,
+                    queryItems: [
+                        URLQueryItem(name: "book_id", value: String(bookId)),
+                        URLQueryItem(name: "status", value: "running"),
+                    ]
+                )
+                if taskList.items.isEmpty {
+                    // Also check pending tasks
+                    let pendingList: TaskList = try await client.get(
+                        APIEndpoints.tasks,
+                        queryItems: [
+                            URLQueryItem(name: "book_id", value: String(bookId)),
+                            URLQueryItem(name: "status", value: "pending"),
+                        ]
+                    )
+                    if pendingList.items.isEmpty {
+                        break
+                    }
+                }
+            } catch {
+                break
+            }
+            try? await Task.sleep(for: .seconds(2))
         }
     }
 
@@ -239,6 +291,8 @@ struct BookDetailView: View {
 struct ChapterRow: View {
     let chapter: ChapterResponse
     let isSelected: Bool
+    let isConverting: Bool
+    let progress: TaskProgress?
     let onTap: () -> Void
     let onPlay: () -> Void
     let onConvert: () -> Void
@@ -263,14 +317,31 @@ struct ChapterRow: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    StatusBadge(status: chapter.status)
+                    if isConverting {
+                        Text("转换中...")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else {
+                        StatusBadge(status: chapter.status)
+                    }
+                }
+
+                if isConverting, let p = progress {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ProgressView(value: p.progress, total: 1.0)
+                            .tint(.orange)
+                        Text(p.message)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
 
             Spacer()
 
             HStack(spacing: 12) {
-                if chapter.status == "completed" {
+                if chapter.status == "completed" && !isConverting {
                     Button { onPlay() } label: {
                         Image(systemName: "play.circle.fill")
                             .font(.title2)
@@ -286,11 +357,16 @@ struct ChapterRow: View {
                     .buttonStyle(.plain)
                 }
 
-                Button { onConvert() } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .foregroundStyle(.orange)
+                if isConverting {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                } else {
+                    Button { onConvert() } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(.orange)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 2)
