@@ -146,6 +146,10 @@ class AudioConverter:
 
         self._report_progress(f"文本分为 {total_chunks} 段，共 {len(text)} 字符", 0)
 
+        # 创建调试输出目录
+        debug_dir = os.path.join(os.path.dirname(output_path), "debug", Path(output_path).stem)
+        os.makedirs(debug_dir, exist_ok=True)
+
         start_time = time.time()
         audio_tensors = []
 
@@ -168,6 +172,16 @@ class AudioConverter:
             )
             chunk_elapsed = time.time() - chunk_start
             audio_tensors.append(audio_tensor)
+
+            # 保存调试文件：文本和音频
+            chunk_base = f"{i+1:03d}"
+            with open(os.path.join(debug_dir, f"{chunk_base}.txt"), "w", encoding="utf-8") as f:
+                f.write(chunk)
+            torchaudio.save(
+                os.path.join(debug_dir, f"{chunk_base}.wav"),
+                audio_tensor,
+                self.model.sampling_rate,
+            )
 
             progress = ((i + 1) / total_chunks) * 100
             self._report_progress(f"第 {i+1}/{total_chunks} 段完成 ({chunk_elapsed:.1f}s)", progress)

@@ -89,25 +89,32 @@ class EpubParser:
 
                     content = epub_zip.read(file_path).decode("utf-8", errors="ignore")
                     soup = BeautifulSoup(content, "html.parser")
-                    text = soup.get_text(separator="\n", strip=True)
 
                     # Skip cover and nav pages
                     if idref in ("cover", "coverpage", "nav", "toc"):
                         continue
 
+                    # 优先从h1/h2/h3获取标题
+                    title_tag = soup.find(["h1", "h2", "h3"])
+                    if title_tag:
+                        chapter_title = title_tag.get_text(strip=True)
+                    else:
+                        # 尝试从<title>标签获取
+                        html_title_tag = soup.find("title")
+                        if html_title_tag and html_title_tag.string:
+                            chapter_title = html_title_tag.string.strip()
+                        else:
+                            chapter_title = f"Chapter {chapter_num + 1}"
+
+                    # 提取正文文本，排除<head>中的<title>以避免重复
+                    head_tag = soup.find("head")
+                    if head_tag:
+                        head_tag.decompose()
+
+                    text = soup.get_text(separator="\n", strip=True)
+
                     if text and len(text) > 10:
                         chapter_num += 1
-                        # 优先从h1/h2/h3获取标题
-                        title_tag = soup.find(["h1", "h2", "h3"])
-                        if title_tag:
-                            chapter_title = title_tag.get_text(strip=True)
-                        else:
-                            # 尝试从<title>标签获取
-                            html_title_tag = soup.find("title")
-                            if html_title_tag and html_title_tag.string:
-                                chapter_title = html_title_tag.string.strip()
-                            else:
-                                chapter_title = f"Chapter {chapter_num}"
 
                         chapters.append(
                             {
@@ -127,21 +134,28 @@ class EpubParser:
 
                     content = epub_zip.read(name).decode("utf-8", errors="ignore")
                     soup = BeautifulSoup(content, "html.parser")
+
+                    # 优先从h1/h2/h3获取标题
+                    title_tag = soup.find(["h1", "h2", "h3"])
+                    if title_tag:
+                        chapter_title = title_tag.get_text(strip=True)
+                    else:
+                        # 尝试从<title>标签获取
+                        html_title_tag = soup.find("title")
+                        if html_title_tag and html_title_tag.string:
+                            chapter_title = html_title_tag.string.strip()
+                        else:
+                            chapter_title = f"Chapter {chapter_num + 1}"
+
+                    # 提取正文文本，排除<head>中的<title>以避免重复
+                    head_tag = soup.find("head")
+                    if head_tag:
+                        head_tag.decompose()
+
                     text = soup.get_text(separator="\n", strip=True)
 
                     if text and len(text) > 10:
                         chapter_num += 1
-                        # 优先从h1/h2/h3获取标题
-                        title_tag = soup.find(["h1", "h2", "h3"])
-                        if title_tag:
-                            chapter_title = title_tag.get_text(strip=True)
-                        else:
-                            # 尝试从<title>标签获取
-                            html_title_tag = soup.find("title")
-                            if html_title_tag and html_title_tag.string:
-                                chapter_title = html_title_tag.string.strip()
-                            else:
-                                chapter_title = f"Chapter {chapter_num}"
 
                         chapters.append(
                             {
