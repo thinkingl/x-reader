@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_PATH="$SCRIPT_DIR/../.venv"
+VENV_PATH="$SCRIPT_DIR/.venv"
 LOG_DIR="$SCRIPT_DIR/logs"
 
 mkdir -p "$LOG_DIR"

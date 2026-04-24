@@ -142,31 +142,69 @@ class VoicePresetList(BaseModel):
 
 # Config schemas
 class ConfigUpdate(BaseModel):
+    # TTS 模式
+    tts_mode: Optional[str] = None  # local | online | online_first
+    
+    # 本地模型配置
     model_path: Optional[str] = None
     device: Optional[str] = None
     precision: Optional[str] = None
     asr_model_path: Optional[str] = None
-    concurrency: Optional[int] = None
+    
+    # 在线 API 配置 (MiMo)
+    mimo_api_key: Optional[str] = None
+    mimo_base_url: Optional[str] = None
+    mimo_model: Optional[str] = None
+    mimo_default_voice: Optional[str] = None
+    
+    # 音频输出配置
     audio_format: Optional[str] = None
     sample_rate: Optional[int] = None
-    chunk_duration: Optional[float] = None
-    chunk_threshold: Optional[float] = None
-    chunk_size: Optional[int] = None
+    concurrency: Optional[int] = None
+    
+    # 本地模型分段配置
+    local_chunk_size: Optional[int] = None
+    local_chunk_gap: Optional[float] = None
+    
+    # 在线 API 分段配置
+    online_chunk_size: Optional[int] = None
+    online_chunk_gap: Optional[float] = None
+    
+    # 目录配置
     book_dir: Optional[str] = None
     audio_dir: Optional[str] = None
 
 
 class ConfigResponse(BaseModel):
-    model_path: str = "/home/x/code/OmniVoice/models/OmniVoice"
+    # TTS 模式
+    tts_mode: str = "online_first"
+    
+    # 本地模型配置
+    model_path: str = "models/OmniVoice"
     device: str = "auto"
     precision: str = "float16"
-    asr_model_path: str = "/home/x/code/OmniVoice/models/whisper-large-v3-turbo"
-    concurrency: int = 1
+    asr_model_path: str = "models/whisper-large-v3-turbo"
+    
+    # 在线 API 配置 (MiMo)
+    mimo_api_key: str = ""
+    mimo_base_url: str = "https://token-plan-cn.xiaomimimo.com/v1"
+    mimo_model: str = "mimo-v2.5-tts"
+    mimo_default_voice: str = "冰糖"
+    
+    # 音频输出配置
     audio_format: str = "wav"
     sample_rate: int = 24000
-    chunk_duration: float = 15.0
-    chunk_threshold: float = 30.0
-    chunk_size: int = 200
+    concurrency: int = 1
+    
+    # 本地模型分段配置
+    local_chunk_size: int = 200
+    local_chunk_gap: float = 0.3
+    
+    # 在线 API 分段配置
+    online_chunk_size: int = 800
+    online_chunk_gap: float = 0.3
+    
+    # 目录配置
     book_dir: str = "data/books"
     audio_dir: str = "data/audio"
 

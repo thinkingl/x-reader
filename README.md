@@ -29,7 +29,7 @@
 cd x-reader/backend
 
 # 激活虚拟环境
-source ../../.venv/bin/activate
+source ../.venv/bin/activate
 
 # 创建数据目录
 mkdir -p data/books data/audio

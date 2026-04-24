@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
+import re
 import shutil
 import zipfile
 import io
@@ -43,8 +44,10 @@ app.add_middleware(
 task_queue = TaskQueue(max_workers=1)
 _global_auth_manager: Optional[AuthManager] = None
 
-LOCAL_MODEL_PATH = "/home/x/code/OmniVoice/models/OmniVoice"
-LOCAL_ASR_MODEL_PATH = "/home/x/code/OmniVoice/models/whisper-large-v3-turbo"
+# 模型路径：相对于项目根目录
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+LOCAL_MODEL_PATH = os.path.join(_PROJECT_ROOT, "models", "OmniVoice")
+LOCAL_ASR_MODEL_PATH = os.path.join(_PROJECT_ROOT, "models", "whisper-large-v3-turbo")
 
 
 def get_auth_manager(db: Session = Depends(get_db)) -> AuthManager:
@@ -128,6 +131,9 @@ def startup():
         asr_model_path=asr_model_path,
     )
     task_queue.set_converter(converter)
+    
+    # 配置在线 TTS
+    task_queue.configure_online_tts()
 
 
 @app.on_event("shutdown")
@@ -637,7 +643,7 @@ async def upload_reference_audio(
         torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
         
         # 本地Whisper模型路径
-        model_id = "/home/x/code/OmniVoice/models/whisper-large-v3-turbo"
+        model_id = LOCAL_ASR_MODEL_PATH
         
         logger.info(f"使用本地Whisper ASR模型: {model_id}, 设备: {device}")
         
@@ -709,16 +715,35 @@ def get_reference_audio(filename: str, _auth: bool = Depends(require_auth)):
 def get_config(db: Session = Depends(get_db)):
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}
     return ConfigResponse(**{
+        # TTS 模式
+        "tts_mode": configs.get("tts_mode", "online_first"),
+        
+        # 本地模型配置
         "model_path": configs.get("model_path", LOCAL_MODEL_PATH),
         "device": configs.get("device", "auto"),
         "precision": configs.get("precision", "float16"),
         "asr_model_path": configs.get("asr_model_path", LOCAL_ASR_MODEL_PATH),
-        "concurrency": int(configs.get("concurrency", "1")),
+        
+        # 在线 API 配置 (MiMo)
+        "mimo_api_key": configs.get("mimo_api_key", ""),
+        "mimo_base_url": configs.get("mimo_base_url", "https://token-plan-cn.xiaomimimo.com/v1"),
+        "mimo_model": configs.get("mimo_model", "mimo-v2.5-tts"),
+        "mimo_default_voice": configs.get("mimo_default_voice", "冰糖"),
+        
+        # 音频输出配置
         "audio_format": configs.get("audio_format", "wav"),
         "sample_rate": int(configs.get("sample_rate", "24000")),
-        "chunk_duration": float(configs.get("chunk_duration", "15.0")),
-        "chunk_threshold": float(configs.get("chunk_threshold", "30.0")),
-        "chunk_size": int(configs.get("chunk_size", "200")),
+        "concurrency": int(configs.get("concurrency", "1")),
+        
+        # 本地模型分段配置
+        "local_chunk_size": int(configs.get("local_chunk_size", "200")),
+        "local_chunk_gap": float(configs.get("local_chunk_gap", "0.3")),
+        
+        # 在线 API 分段配置
+        "online_chunk_size": int(configs.get("online_chunk_size", "800")),
+        "online_chunk_gap": float(configs.get("online_chunk_gap", "0.3")),
+        
+        # 目录配置
         "book_dir": configs.get("book_dir", "data/books"),
         "audio_dir": configs.get("audio_dir", "data/audio"),
     })
@@ -740,9 +765,9 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool
         task_queue.max_workers = int(update_data["concurrency"])
         task_queue.executor._max_workers = int(update_data["concurrency"])
 
-    if "chunk_size" in update_data:
+    if "local_chunk_size" in update_data:
         if task_queue.converter:
-            task_queue.converter.chunk_size = int(update_data["chunk_size"])
+            task_queue.converter.chunk_size = int(update_data["local_chunk_size"])
 
     return get_config(db)
 
@@ -750,18 +775,24 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool
 @app.post("/api/config/test")
 async def test_tts(
     text: str = Form(...),
+    engine: str = Form("local"),  # local | online
     voice_preset_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     _auth: bool = Depends(require_auth),
 ):
     """测试 TTS 配置，生成音频并返回"""
     import uuid
-    import tempfile
+    import base64
 
     # 获取配置
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}
     audio_format = configs.get("audio_format", "wav")
-    chunk_size = int(configs.get("chunk_size", "200"))
+    
+    # 根据引擎选择分段大小
+    if engine == "online":
+        chunk_size = int(configs.get("online_chunk_size", "800"))
+    else:
+        chunk_size = int(configs.get("local_chunk_size", "200"))
 
     # 获取语音预设
     voice_mode = "auto"
@@ -790,7 +821,50 @@ async def test_tts(
     output_path = f"data/audio/test_{test_id}.{audio_format}"
 
     try:
-        # 确保 converter 已加载
+        # 在线 API 测试
+        if engine == "online":
+            mimo_api_key = configs.get("mimo_api_key", "")
+            if not mimo_api_key:
+                raise HTTPException(400, "未配置 MiMo API Key")
+            
+            mimo_base_url = configs.get("mimo_base_url", "https://token-plan-cn.xiaomimimo.com/v1")
+            
+            from app.services.mimo_tts import MiMoTTSClient
+            mimo_client = MiMoTTSClient(api_key=mimo_api_key, base_url=mimo_base_url)
+            
+            # 获取默认语音
+            mimo_default_voice = configs.get("mimo_default_voice", "冰糖")
+            
+            # 调用 MiMo API
+            audio_bytes = mimo_client.synthesize(
+                text=text,
+                voice_mode=voice_mode,
+                voice_id=mimo_default_voice,
+                instruct=instruct,
+                ref_audio_path=ref_audio_path,
+                audio_format=audio_format,
+            )
+            
+            # 保存音频文件
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, "wb") as f:
+                f.write(audio_bytes)
+            
+            # 计算时长 (WAV 24kHz 16bit mono)
+            if audio_format == "wav":
+                duration = (len(audio_bytes) - 44) / (24000 * 2)  # 44 bytes header, 2 bytes per sample
+            else:
+                duration = 0  # 其他格式难以精确计算
+            
+            return {
+                "success": True,
+                "audio_url": f"/api/config/test-audio/test_{test_id}.{audio_format}",
+                "duration": duration,
+                "engine": "online",
+                "message": f"[在线] 生成成功，时长 {duration:.1f} 秒",
+            }
+        
+        # 本地模型测试
         if not task_queue.converter:
             raise HTTPException(500, "TTS 模型未加载")
 
@@ -813,13 +887,15 @@ async def test_tts(
             "success": True,
             "audio_url": f"/api/config/test-audio/test_{test_id}.{audio_format}",
             "duration": result["duration"],
-            "message": f"生成成功，时长 {result['duration']:.1f} 秒",
+            "engine": "local",
+            "message": f"[本地] 生成成功，时长 {result['duration']:.1f} 秒",
         }
     except Exception as e:
         return {
             "success": False,
             "audio_url": None,
             "duration": 0,
+            "engine": engine,
             "message": f"生成失败: {str(e)}",
         }
 

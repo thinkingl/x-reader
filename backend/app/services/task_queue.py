@@ -23,6 +23,28 @@ class TaskQueue:
 
     def set_converter(self, converter: AudioConverter):
         self.converter = converter
+    
+    def configure_online_tts(self):
+        """从数据库配置在线 TTS"""
+        if not self.converter:
+            return
+        
+        db = SessionLocal()
+        try:
+            configs = {c.key: c.value for c in db.query(SystemConfig).all()}
+            tts_mode = configs.get("tts_mode", "online_first")
+            mimo_api_key = configs.get("mimo_api_key", "")
+            mimo_base_url = configs.get("mimo_base_url", "https://token-plan-cn.xiaomimimo.com/v1")
+            online_chunk_size = int(configs.get("online_chunk_size", "800"))
+            
+            self.converter.configure_online_tts(
+                tts_mode=tts_mode,
+                api_key=mimo_api_key,
+                online_chunk_size=online_chunk_size,
+                base_url=mimo_base_url,
+            )
+        finally:
+            db.close()
 
     def get_progress(self, task_id: int) -> Optional[Dict]:
         return self.progress.get(task_id)
@@ -97,7 +119,7 @@ class TaskQueue:
             configs = {c.key: c.value for c in db.query(SystemConfig).all()}
             audio_dir = configs.get("audio_dir", "data/audio")
             audio_format = configs.get("audio_format", "wav")
-            chunk_size = int(configs.get("chunk_size", "200"))
+            chunk_size = int(configs.get("local_chunk_size", "200"))
 
             # 文件名格式: {序号}_{标题}.{格式}，序号补零保证排序正确
             safe_title = "".join(c for c in chapter.title if c.isalnum() or c in " _-").strip()[:30] if chapter.title else ""

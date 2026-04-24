@@ -10,14 +10,14 @@ echo   x-reader 服务启动
 echo =========================================
 
 :: 检查虚拟环境
-if not exist "%SCRIPT_DIR%..\..\.venv\Scripts\activate.bat" (
+if not exist "%SCRIPT_DIR%.venv\Scripts\activate.bat" (
     echo 错误: 虚拟环境不存在
     exit /b 1
 )
 
 :: 启动后端
 echo 启动后端 (端口 %BACKEND_PORT%)...
-start "x-reader backend" cmd /k "cd /d %SCRIPT_DIR%backend && call %SCRIPT_DIR%..\..\.venv\Scripts\activate.bat && uvicorn app.main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload"
+start "x-reader backend" cmd /k "cd /d %SCRIPT_DIR%backend && call %SCRIPT_DIR%.venv\Scripts\activate.bat && uvicorn app.main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload"
 
 :: 等待后端启动
 echo 等待后端启动...

@@ -129,14 +129,14 @@ function TaskList() {
       width: 100,
       render: (_, record) => {
         if (record.started_at && record.finished_at) {
-          const start = new Date(record.started_at);
-          const end = new Date(record.finished_at);
+          const start = new Date(record.started_at + 'Z');
+          const end = new Date(record.finished_at + 'Z');
           const seconds = Math.round((end - start) / 1000);
           if (seconds < 60) return `${seconds}秒`;
           return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
         }
         if (record.started_at && record.status === 'running') {
-          const start = new Date(record.started_at);
+          const start = new Date(record.started_at + 'Z');
           const now = new Date();
           const seconds = Math.round((now - start) / 1000);
           return `${seconds}秒...`;

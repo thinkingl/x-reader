@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Table, Button, Select, message, Space, Tag, Card, Descriptions, Tooltip, Progress } from 'antd';
-import { PlayCircleOutlined, ReloadOutlined, AudioOutlined, SyncOutlined, ClockCircleOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Table, Button, Select, message, Space, Tag, Card, Descriptions, Tooltip, Progress, Modal } from 'antd';
+import { PlayCircleOutlined, ReloadOutlined, AudioOutlined, SyncOutlined, ClockCircleOutlined, DownloadOutlined, EyeOutlined } from '@ant-design/icons';
 import api from '../api';
 import { AudioContext } from '../components/AudioPlayer';
 
@@ -10,13 +10,31 @@ function BookDetail() {
   const [book, setBook] = useState(null);
   const [chapters, setChapters] = useState([]);
   const [presets, setPresets] = useState([]);
-  const [selectedPreset, setSelectedPreset] = useState(null);
+  const [selectedPreset, setSelectedPreset] = useState(() => {
+    const saved = localStorage.getItem('selectedPreset');
+    return saved ? parseInt(saved) : null;
+  });
   const [loading, setLoading] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
   const [downloadingChapter, setDownloadingChapter] = useState(null);
   const [taskProgress, setTaskProgress] = useState({});  // {taskId: {message, elapsed}}
   const { playAudio } = useContext(AudioContext);
   const progressInterval = useRef(null);
+  
+  // 章节内容查看
+  const [viewModalVisible, setViewModalVisible] = useState(false);
+  const [viewChapter, setViewChapter] = useState(null);
+  const [viewContent, setViewContent] = useState('');
+  const [viewLoading, setViewLoading] = useState(false);
+
+  const handlePresetChange = (value) => {
+    setSelectedPreset(value);
+    if (value === null) {
+      localStorage.removeItem('selectedPreset');
+    } else {
+      localStorage.setItem('selectedPreset', value);
+    }
+  };
 
   useEffect(() => {
     fetchBook();
@@ -166,6 +184,26 @@ function BookDetail() {
     return mins > 0 ? `${mins}m${secs}s` : `${secs}s`;
   };
 
+  const handleViewChapter = async (chapter) => {
+    setViewChapter(chapter);
+    setViewModalVisible(true);
+    setViewLoading(true);
+    try {
+      const res = await api.get(`/api/chapters/${chapter.id}`);
+      setViewContent(res.data.text_content || '');
+    } catch (err) {
+      message.error('获取章节内容失败');
+      setViewContent('');
+    }
+    setViewLoading(false);
+  };
+
+  const handleCloseView = () => {
+    setViewModalVisible(false);
+    setViewChapter(null);
+    setViewContent('');
+  };
+
   const columns = [
     { title: '章节', dataIndex: 'chapter_number', width: 80 },
     { title: '标题', dataIndex: 'title', ellipsis: true },
@@ -218,62 +256,70 @@ function BookDetail() {
     },
     {
       title: '操作',
-      width: 200,
+      width: 180,
       render: (_, record) => (
-        <Space>
-          {record.status === 'pending' && (
+        <Space size={4}>
+          <Tooltip title="查看内容">
             <Button
               size="small"
               type="link"
-              icon={<AudioOutlined />}
-              onClick={() => handleConvert(record.id)}
-            >
-              转换
-            </Button>
+              icon={<EyeOutlined />}
+              onClick={() => handleViewChapter(record)}
+            />
+          </Tooltip>
+          {record.status === 'pending' && (
+            <Tooltip title="转换">
+              <Button
+                size="small"
+                type="link"
+                icon={<AudioOutlined />}
+                onClick={() => handleConvert(record.id)}
+              />
+            </Tooltip>
           )}
           {record.status === 'converting' && (
-            <Button size="small" type="link" icon={<ClockCircleOutlined />} disabled>
-              转换中...
-            </Button>
+            <Tooltip title="转换中...">
+              <Button size="small" type="link" icon={<ClockCircleOutlined />} disabled />
+            </Tooltip>
           )}
           {record.status === 'completed' && (
             <>
-              <Button
-                size="small"
-                type="link"
-                icon={<PlayCircleOutlined />}
-                onClick={() => handlePlay(record)}
-              >
-                播放
-              </Button>
-              <Button
-                size="small"
-                type="link"
-                icon={<DownloadOutlined />}
-                onClick={() => handleDownloadChapter(record)}
-                loading={downloadingChapter === record.id}
-              >
-                下载
-              </Button>
+              <Tooltip title="播放">
+                <Button
+                  size="small"
+                  type="link"
+                  icon={<PlayCircleOutlined />}
+                  onClick={() => handlePlay(record)}
+                />
+              </Tooltip>
+              <Tooltip title="下载">
+                <Button
+                  size="small"
+                  type="link"
+                  icon={<DownloadOutlined />}
+                  onClick={() => handleDownloadChapter(record)}
+                  loading={downloadingChapter === record.id}
+                />
+              </Tooltip>
+              <Tooltip title="重新生成">
+                <Button
+                  size="small"
+                  type="link"
+                  icon={<ReloadOutlined />}
+                  onClick={() => handleConvert(record.id)}
+                />
+              </Tooltip>
+            </>
+          )}
+          {record.status === 'failed' && (
+            <Tooltip title="重试">
               <Button
                 size="small"
                 type="link"
                 icon={<ReloadOutlined />}
                 onClick={() => handleConvert(record.id)}
-              >
-                重新生成
-              </Button>
-            </>
-          )}
-          {record.status === 'failed' && (
-            <Button
-              size="small"
-              type="link"
-              icon={<ReloadOutlined />}
-              onClick={() => handleConvert(record.id)}
-            >
-              重试
-            </Button>
+              />
+            </Tooltip>
           )}
         </Space>
       ),
@@ -299,7 +345,7 @@ function BookDetail() {
           placeholder="选择语音预设"
           style={{ width: 200 }}
           value={selectedPreset}
-          onChange={setSelectedPreset}
+          onChange={handlePresetChange}
           options={[
             { label: '随机', value: null },
             ...presets.map(p => ({ label: p.name, value: p.id }))
@@ -330,6 +376,27 @@ function BookDetail() {
         rowKey="id"
         pagination={false}
       />
+
+      <Modal
+        title={viewChapter ? `第${viewChapter.chapter_number}章 ${viewChapter.title}` : '章节内容'}
+        open={viewModalVisible}
+        onCancel={handleCloseView}
+        footer={[
+          <Button key="close" onClick={handleCloseView}>
+            关闭
+          </Button>
+        ]}
+        width={800}
+        styles={{ body: { maxHeight: '60vh', overflowY: 'auto' } }}
+      >
+        {viewLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>加载中...</div>
+        ) : (
+          <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, fontSize: 14 }}>
+            {viewContent || '无内容'}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
