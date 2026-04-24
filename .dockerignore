@@ -1,0 +1,17 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+node_modules
+dist
+build
+*.log
+.env
+*.md
+ios
+test_books
+*.xcodeproj
+.DS_Store
