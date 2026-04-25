@@ -179,6 +179,10 @@ class TaskQueue:
                     task.status = TaskStatus.FAILED
                     task.error_message = str(e)
                     task.finished_at = datetime.utcnow()
+                    # 更新章节状态为失败
+                    chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
+                    if chapter and chapter.status == "converting":
+                        chapter.status = "failed"
                     db.commit()
             except:
                 pass
