@@ -13,6 +13,7 @@ struct TaskListView: View {
     private let statusOptions: [(String?, String)] = [
         (nil, "全部"),
         ("pending", "待处理"),
+        ("queued", "排队中"),
         ("running", "进行中"),
         ("completed", "已完成"),
         ("failed", "失败"),
@@ -129,7 +130,7 @@ struct TaskRow: View {
                         .font(.caption)
                         .buttonStyle(.bordered)
                 }
-                if task.status == .pending {
+                if task.status == .pending || task.status == .queued {
                     Button("取消", action: onCancel)
                         .font(.caption)
                         .buttonStyle(.bordered)

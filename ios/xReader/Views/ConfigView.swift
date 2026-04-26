@@ -74,17 +74,30 @@ struct ConfigView: View {
 
             if let config {
                 Section("TTS 引擎") {
+                    LabeledContent("模式", value: ttsModeLabel(config.tts_mode))
                     LabeledContent("设备", value: config.device)
                     LabeledContent("精度", value: config.precision)
                     LabeledContent("并发数", value: "\(config.concurrency)")
                 }
 
+                Section("在线 TTS (MiMo)") {
+                    LabeledContent("API 地址", value: config.mimo_base_url)
+                        .font(.caption)
+                    LabeledContent("模型", value: config.mimo_model)
+                    LabeledContent("默认语音", value: config.mimo_default_voice)
+                    LabeledContent("API Key", value: config.mimo_api_key.isEmpty ? "未配置" : "已配置")
+                }
+
+                Section("文本分段") {
+                    LabeledContent("本地分段", value: "\(config.local_chunk_size) 字符")
+                    LabeledContent("在线分段", value: "\(config.online_chunk_size) 字符")
+                    LabeledContent("本地间隔", value: String(format: "%.1f s", config.local_chunk_gap))
+                    LabeledContent("在线间隔", value: String(format: "%.1f s", config.online_chunk_gap))
+                }
+
                 Section("音频输出") {
                     LabeledContent("格式", value: config.audio_format.uppercased())
                     LabeledContent("采样率", value: "\(config.sample_rate) Hz")
-                    LabeledContent("分块时长", value: String(format: "%.1f s", config.chunk_duration))
-                    LabeledContent("分块阈值", value: String(format: "%.1f s", config.chunk_threshold))
-                    LabeledContent("文本分段", value: "\(config.chunk_size) 字")
                 }
 
                 Section("路径") {
@@ -194,5 +207,14 @@ struct ConfigView: View {
             _ = CC_SHA256(buffer.baseAddress, CC_LONG(data.count), &hash)
         }
         return hash.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func ttsModeLabel(_ mode: String) -> String {
+        switch mode {
+        case "local": return "仅本地"
+        case "online": return "仅在线"
+        case "online_first": return "在线优先"
+        default: return mode
+        }
     }
 }

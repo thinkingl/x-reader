@@ -2,6 +2,7 @@ import Foundation
 
 enum TaskStatusEnum: String, Codable {
     case pending
+    case queued
     case running
     case completed
     case failed

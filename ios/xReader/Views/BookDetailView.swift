@@ -14,6 +14,7 @@ struct BookDetailView: View {
     @State private var errorMessage: String?
     @State private var isConverting = false
     @State private var convertingChapterIds: Set<Int> = []
+    @State private var viewingChapter: ChapterResponse?
     @StateObject private var polling = TaskPollingService()
 
     var body: some View {
@@ -66,12 +67,24 @@ struct BookDetailView: View {
                         onDownload: {
                             Task { await downloadChapter(chapter) }
                         },
+                        onViewContent: {
+                            viewingChapter = chapter
+                        },
                         baseURL: client.baseURL
                     )
                 }
             }
         }
         .navigationTitle(book?.title ?? "图书详情")
+        .sheet(item: $viewingChapter) { chapter in
+            NavigationStack {
+                ChapterContentView(
+                    client: client,
+                    chapterId: chapter.id,
+                    chapterTitle: chapter.title ?? "第\(chapter.chapter_number)章"
+                )
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack {
@@ -188,16 +201,26 @@ struct BookDetailView: View {
                     ]
                 )
                 if taskList.items.isEmpty {
-                    // Also check pending tasks
-                    let pendingList: TaskList = try await client.get(
+                    // Also check queued tasks
+                    let queuedList: TaskList = try await client.get(
                         APIEndpoints.tasks,
                         queryItems: [
                             URLQueryItem(name: "book_id", value: String(bookId)),
-                            URLQueryItem(name: "status", value: "pending"),
+                            URLQueryItem(name: "status", value: "queued"),
                         ]
                     )
-                    if pendingList.items.isEmpty {
-                        break
+                    if queuedList.items.isEmpty {
+                        // Also check pending tasks
+                        let pendingList: TaskList = try await client.get(
+                            APIEndpoints.tasks,
+                            queryItems: [
+                                URLQueryItem(name: "book_id", value: String(bookId)),
+                                URLQueryItem(name: "status", value: "pending"),
+                            ]
+                        )
+                        if pendingList.items.isEmpty {
+                            break
+                        }
                     }
                 }
             } catch {
@@ -297,6 +320,7 @@ struct ChapterRow: View {
     let onPlay: () -> Void
     let onConvert: () -> Void
     let onDownload: () -> Void
+    let onViewContent: () -> Void
     let baseURL: String
 
     var body: some View {
@@ -341,6 +365,12 @@ struct ChapterRow: View {
             Spacer()
 
             HStack(spacing: 12) {
+                Button { onViewContent() } label: {
+                    Image(systemName: "doc.text")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                
                 if chapter.status == "completed" && !isConverting {
                     Button { onPlay() } label: {
                         Image(systemName: "play.circle.fill")
@@ -395,6 +425,7 @@ struct StatusBadge: View {
     private var label: String {
         switch status {
         case "pending": return "待转换"
+        case "queued": return "排队中"
         case "converting": return "转换中"
         case "completed": return "已完成"
         case "failed": return "失败"
@@ -406,6 +437,7 @@ struct StatusBadge: View {
         switch status {
         case "completed": return .green
         case "converting": return .orange
+        case "queued": return .yellow
         case "failed": return .red
         default: return .secondary
         }
