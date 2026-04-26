@@ -20,13 +20,13 @@ PYTHONPATH=. pytest tests/ -v
 ```
 
 ### 关键信息
-- 所有 API 路由在 `app/main.py` (约 920 行)，无独立路由文件
-- DB models 已从 `app/models/database.py` 删除，目前代码有导入错误
-- Pydantic schemas: `app/schemas.py`
+- 所有 API 路由在 `app/main.py` (~960 行)，无独立路由文件
+- DB models: `app/models/database.py`，Pydantic schemas: `app/schemas.py`
 - 认证已实现：Challenge-Response + JWT Token (`app/services/auth.py`)
-- 启动时自动重置 stuck 的 `running` 任务为 `failed`
+- 启动时自动重置 stuck 的 `running` 任务为 `failed`，修复状态不一致的章节
 - 模型路径：`LOCAL_MODEL_PATH = ../models/OmniVoice`，`LOCAL_ASR_MODEL_PATH = ../models/whisper-large-v3-turbo`
 - 在线 TTS：`app/services/mimo_tts.py` 封装小米 MiMo API，支持在线优先+失败回退
+- 任务状态：pending → queued → running → completed/failed，按段回退本地模型
 
 ### 测试模式
 - conftest.py 有 autouse fixtures：自动 mock AudioConverter 和 task_queue
@@ -86,6 +86,8 @@ docker-compose down    # 停止服务
 - 认证功能：Challenge-Response + JWT Token
 - Docker 支持
 - 在线 TTS 支持：小米 MiMo V2.5 API，支持在线优先+失败回退
+- 任务状态管理：pending → queued → running → completed/failed
+- 任务列表后端分页，章节内容查看，播放缓存修复
 
 ### 待修复
 - PDF 按目录书签分章
