@@ -62,8 +62,13 @@ class TaskQueue:
         if not task:
             return
 
-        task.status = TaskStatus.RUNNING
-        task.started_at = datetime.utcnow()
+        task.status = TaskStatus.QUEUED
+        
+        # 更新章节状态为 queued
+        chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
+        if chapter:
+            chapter.status = "queued"
+        
         db.commit()
 
         self.progress[task_id] = {
@@ -79,10 +84,19 @@ class TaskQueue:
     def _execute_task(self, task_id: int):
         db = SessionLocal()
         try:
+            # 任务真正开始执行，更新状态和 start_time
             task = db.query(Task).filter(Task.id == task_id).first()
             if not task:
                 return
-
+            
+            task.status = TaskStatus.RUNNING
+            task.started_at = datetime.utcnow()
+            db.commit()
+            
+            if task_id in self.progress:
+                self.progress[task_id]["start_time"] = time.time()
+                self.progress[task_id]["message"] = "开始转换..."
+            
             chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
             if not chapter:
                 task.status = TaskStatus.FAILED
@@ -204,7 +218,7 @@ class TaskQueue:
             for chapter in chapters:
                 existing_task = db.query(Task).filter(
                     Task.chapter_id == chapter.id,
-                    Task.status.in_([TaskStatus.PENDING, TaskStatus.RUNNING])
+                    Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING])
                 ).first()
 
                 if existing_task:

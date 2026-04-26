@@ -215,6 +215,7 @@ function BookDetail() {
       render: (status, record) => {
         const statusMap = {
           pending: { color: 'default', text: '待转换' },
+          queued: { color: 'warning', text: '排队中' },
           converting: { color: 'processing', text: '转换中' },
           completed: { color: 'success', text: '已完成' },
           failed: { color: 'error', text: '失败' },

@@ -1,4 +1,5 @@
 import os
+import json
 import base64
 import logging
 import requests
@@ -88,7 +89,10 @@ class MiMoTTSClient:
             "audio": audio_config,
         }
         
+        print(f"[MiMo API] model={model}, voice_mode={voice_mode}, text_len={len(text)}")
+        print(f"[MiMo API] messages: {json.dumps(messages, ensure_ascii=False)}")
         logger.info(f"调用 MiMo API: model={model}, voice_mode={voice_mode}, text_len={len(text)}")
+        logger.info(f"MiMo API 请求参数: {json.dumps(payload, ensure_ascii=False, indent=2)}")
         
         response = self.session.post(
             f"{self.base_url}/chat/completions",

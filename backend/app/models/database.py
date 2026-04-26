@@ -8,6 +8,7 @@ Base = declarative_base()
 
 class TaskStatus(str, enum.Enum):
     PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"

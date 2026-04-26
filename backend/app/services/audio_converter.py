@@ -259,13 +259,20 @@ class AudioConverter:
         online_count = 0
         local_count = 0
         
+        # 创建调试输出目录
+        debug_dir = os.path.join(os.path.dirname(output_path), "debug", Path(output_path).stem)
+        os.makedirs(debug_dir, exist_ok=True)
+        print(f"[混合] 调试目录: {debug_dir}")
+        
         for i, chunk in enumerate(chunks):
             chunk_preview = chunk[:30] + "..." if len(chunk) > 30 else chunk
             progress = (i / total_chunks) * 100
             self._report_progress(f"[混合] 转换第 {i+1}/{total_chunks} 段: {chunk_preview}", progress)
+            print(f"[混合] 转换第 {i+1}/{total_chunks} 段: {chunk_preview}")
             
             chunk_start = time.time()
             audio_tensor = None
+            engine_used = "none"
             
             # 先尝试在线 TTS
             if self.mimo_client:
@@ -282,8 +289,11 @@ class AudioConverter:
                     audio_buffer = io.BytesIO(audio_bytes)
                     audio_tensor, sample_rate = torchaudio.load(audio_buffer)
                     online_count += 1
+                    engine_used = "online"
+                    print(f"[混合] 第 {i+1} 段在线转换成功")
                 except Exception as e:
                     logger.warning(f"[混合] 在线 TTS 失败，段 {i+1}: {e}")
+                    print(f"[混合] 在线 TTS 失败，段 {i+1}: {e}")
             
             # 在线失败，使用本地 TTS
             if audio_tensor is None:
@@ -302,11 +312,24 @@ class AudioConverter:
                     )
                     sample_rate = self.model.sampling_rate
                     local_count += 1
+                    engine_used = "local"
+                    print(f"[混合] 第 {i+1} 段本地转换成功")
                 except Exception as e:
                     logger.error(f"[混合] 本地 TTS 也失败，段 {i+1}: {e}")
+                    print(f"[混合] 本地 TTS 也失败，段 {i+1}: {e}")
                     raise
             
             audio_chunks.append(audio_tensor)
+            
+            # 保存调试文件
+            chunk_base = f"{i+1:03d}_{engine_used}"
+            with open(os.path.join(debug_dir, f"{chunk_base}.txt"), "w", encoding="utf-8") as f:
+                f.write(f"[{engine_used}] {chunk}")
+            torchaudio.save(
+                os.path.join(debug_dir, f"{chunk_base}.wav"),
+                audio_tensor,
+                sample_rate,
+            )
             
             chunk_elapsed = time.time() - chunk_start
             progress = ((i + 1) / total_chunks) * 100

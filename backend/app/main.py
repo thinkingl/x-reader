@@ -116,6 +116,19 @@ def startup():
         db.commit()
         logger.info(f"已重置 {len(stuck_chapters)} 个中断的章节")
 
+    # Fix chapters with queued status but no active task
+    queued_chapters = db.query(Chapter).filter(Chapter.status == "queued").all()
+    for chapter in queued_chapters:
+        active_task = db.query(Task).filter(
+            Task.chapter_id == chapter.id,
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING])
+        ).first()
+        if not active_task:
+            chapter.status = "pending"
+    if queued_chapters:
+        db.commit()
+        logger.info(f"已修复 {len(queued_chapters)} 个排队状态异常的章节")
+
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}
     db.close()
 
@@ -332,7 +345,20 @@ def create_task(data: TaskCreate, db: Session = Depends(get_db), _auth: bool = D
     if not chapters:
         raise HTTPException(400, "No chapters to process")
 
+    last_task = None
     for chapter in chapters:
+        # 跳过已完成的章节
+        if chapter.status == "completed":
+            continue
+        
+        # 跳过已有活跃任务的章节
+        existing_task = db.query(Task).filter(
+            Task.chapter_id == chapter.id,
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING])
+        ).first()
+        if existing_task:
+            continue
+        
         task = Task(
             book_id=data.book_id,
             chapter_id=chapter.id,
@@ -343,8 +369,12 @@ def create_task(data: TaskCreate, db: Session = Depends(get_db), _auth: bool = D
         db.commit()
         db.refresh(task)
         task_queue.submit_task(task.id, db)
+        last_task = task
 
-    return task
+    if not last_task:
+        raise HTTPException(400, "No chapters to process (all completed or in progress)")
+
+    return last_task
 
 
 @app.get("/api/tasks", response_model=TaskList)
@@ -395,6 +425,11 @@ def cancel_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depen
         raise HTTPException(404, "Task not found")
     if task.status == TaskStatus.RUNNING:
         raise HTTPException(400, "Cannot cancel running task")
+
+    # 更新章节状态为 pending
+    chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
+    if chapter and chapter.status in ("queued", "converting"):
+        chapter.status = "pending"
 
     db.delete(task)
     db.commit()

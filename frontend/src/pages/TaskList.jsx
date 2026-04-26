@@ -11,6 +11,7 @@ function TaskList() {
   const [bookFilter, setBookFilter] = useState(null);
   const [books, setBooks] = useState([]);
   const [chapters, setChapters] = useState({});
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -18,16 +19,20 @@ function TaskList() {
     fetchBooks();
     const interval = setInterval(fetchTasks, 3000);
     return () => clearInterval(interval);
-  }, [statusFilter, bookFilter]);
+  }, [statusFilter, bookFilter, pagination.current]);
 
   const fetchTasks = async () => {
     setLoading(true);
     try {
-      const params = {};
+      const params = {
+        page: pagination.current,
+        page_size: pagination.pageSize,
+      };
       if (statusFilter) params.status = statusFilter;
       if (bookFilter) params.book_id = bookFilter;
       const res = await api.get('/api/tasks', { params });
       setTasks(res.data.items);
+      setPagination(prev => ({ ...prev, total: res.data.total }));
 
       // Fetch chapter info for each task
       const chapterIds = [...new Set(res.data.items.map(t => t.chapter_id))];
@@ -43,6 +48,10 @@ function TaskList() {
       message.error('获取任务列表失败');
     }
     setLoading(false);
+  };
+
+  const handlePageChange = (page, pageSize) => {
+    setPagination(prev => ({ ...prev, current: page, pageSize }));
   };
 
   const fetchBooks = async () => {
@@ -76,6 +85,7 @@ function TaskList() {
 
   const statusMap = {
     pending: { color: 'default', text: '待处理' },
+    queued: { color: 'warning', text: '排队中' },
     running: { color: 'processing', text: '运行中' },
     completed: { color: 'success', text: '已完成' },
     failed: { color: 'error', text: '失败' },
@@ -149,7 +159,7 @@ function TaskList() {
       width: 200,
       render: (_, record) => (
         <Space>
-          {record.status === 'pending' && (
+          {(record.status === 'pending' || record.status === 'queued') && (
             <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleCancel(record.id)}>
               取消
             </Button>
@@ -196,11 +206,15 @@ function TaskList() {
           placeholder="按状态筛选"
           style={{ width: 150 }}
           value={statusFilter}
-          onChange={setStatusFilter}
+          onChange={(value) => {
+            setStatusFilter(value);
+            setPagination(prev => ({ ...prev, current: 1 }));
+          }}
           allowClear
           options={[
             { label: '全部', value: null },
             { label: '待处理', value: 'pending' },
+            { label: '排队中', value: 'queued' },
             { label: '运行中', value: 'running' },
             { label: '已完成', value: 'completed' },
             { label: '失败', value: 'failed' },
@@ -211,7 +225,10 @@ function TaskList() {
           placeholder="按图书筛选"
           style={{ width: 200 }}
           value={bookFilter}
-          onChange={setBookFilter}
+          onChange={(value) => {
+            setBookFilter(value);
+            setPagination(prev => ({ ...prev, current: 1 }));
+          }}
           allowClear
           options={books.map(b => ({ label: b.title, value: b.id }))}
         />
@@ -223,7 +240,14 @@ function TaskList() {
         dataSource={tasks}
         rowKey="id"
         loading={loading}
-        pagination={{ pageSize: 20 }}
+        pagination={{
+          current: pagination.current,
+          pageSize: pagination.pageSize,
+          total: pagination.total,
+          onChange: handlePageChange,
+          showSizeChanger: true,
+          showTotal: (total) => `共 ${total} 条`,
+        }}
       />
     </div>
   );
