@@ -1,12 +1,13 @@
 # x-reader
 
-> 电子书 → 有声读物 转换系统，基于 OmniVoice TTS 引擎
+> 电子书 → 有声读物 转换系统，基于 OmniVoice TTS 引擎 + 小米 MiMo 在线 TTS
 
 ## 功能特性
 
 - 📚 支持 EPUB、PDF、TXT 电子书格式
 - 🎯 按章节自动解析，支持中文章节标题识别
-- 🎙️ 基于 OmniVoice 的高质量语音合成（支持 600+ 种语言）
+- 🎙️ 基于 OmniVoice 的高质量本地语音合成（支持 600+ 种语言）
+- ☁️ 支持小米 MiMo V2.5 在线 TTS（在线优先 + 失败自动回退本地）
 - 🎨 语音设计：通过属性（性别、年龄、音调、口音）自定义声音
 - 👤 语音克隆：上传参考音频，ASR 自动转录，一键克隆声音
 - 📊 实时进度显示（文本分段转换，逐段显示进度）
@@ -14,6 +15,8 @@
 - 🎧 内置浮动音频播放器，切换页面不打断播放
 - 🔧 独立语音预设管理页面，可保存多组配置
 - 🧪 配置测试功能：输入文本实时验证语音效果
+- 🔐 认证功能：Challenge-Response + JWT Token
+- 📱 iOS 原生客户端
 
 ## 快速开始
 
@@ -21,7 +24,7 @@
 
 - Python >= 3.10
 - Node.js >= 16
-- NVIDIA GPU（推荐，用于加速转换）
+- NVIDIA GPU（推荐，用于加速本地转换）
 
 ### 1. 启动后端
 
@@ -35,7 +38,7 @@ source ../.venv/bin/activate
 mkdir -p data/books data/audio
 
 # 启动后端服务
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 2. 启动前端
@@ -52,6 +55,36 @@ npm run dev
 
 访问 http://localhost:5173
 
+### 3. 使用 Docker（可选）
+
+```bash
+docker-compose up -d   # 启动服务 (端口 8000 + 5173)
+docker-compose down    # 停止服务
+```
+
+## TTS 引擎配置
+
+### 本地模型
+
+使用 OmniVoice 模型进行本地语音合成，支持：
+- 语音设计（通过文本描述自定义声音）
+- 语音克隆（上传参考音频克隆声音）
+- 自动模式（模型自动选择声音）
+
+### 在线 TTS（小米 MiMo V2.5）
+
+支持三种模式：
+- **仅本地**：只使用本地 OmniVoice 模型
+- **仅在线**：只使用 MiMo 在线 API
+- **在线优先**：优先使用 MiMo API，失败时自动回退本地模型
+
+配置步骤：
+1. 在「配置」页面选择 TTS 模式为「在线优先」
+2. 填入 MiMo API Key
+3. 选择 API 地址和默认语音
+
+MiMo 支持的内置语音：冰糖、茉莉、苏打、白桦、Mia、Chloe、Milo、Dean
+
 ## 使用指南
 
 ### 上传电子书
@@ -67,6 +100,16 @@ npm run dev
 2. 选择语音预设（可选）
 3. 点击「转换」按钮转换单章，或「转换全部未完成章节」
 4. 实时查看进度条和当前状态
+
+### 任务状态
+
+| 状态 | 说明 |
+|------|------|
+| 待转换 | 章节未创建任务 |
+| 排队中 | 任务已创建，等待执行 |
+| 转换中 | 正在进行语音合成 |
+| 已完成 | 转换成功，可播放/下载 |
+| 失败 | 转换失败，可重试 |
 
 ### 语音预设配置
 
@@ -101,12 +144,13 @@ npm run dev
 
 ### 测试语音效果
 
-在「编辑预设」页面可以测试当前预设的语音效果：
+在「配置」页面可以测试 TTS 效果：
 
-1. 编辑任意语音预设
-2. 在「测试预设效果」区域输入测试文本
-3. 点击「生成语音」，使用当前预设参数生成音频
-4. 生成完成后点击「播放」验证效果
+1. 输入测试文本
+2. 选择测试引擎（本地/在线）
+3. 选择语音预设（可选）
+4. 点击「生成测试音频」
+5. 生成完成后点击「播放」验证效果
 
 ## 项目结构
 
@@ -114,25 +158,30 @@ npm run dev
 x-reader/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI 主应用
+│   │   ├── main.py              # FastAPI 主应用 (~960 行)
 │   │   ├── database.py          # 数据库连接
 │   │   ├── schemas.py           # Pydantic 数据模型
 │   │   ├── models/
 │   │   │   └── database.py      # SQLAlchemy ORM 模型
 │   │   └── services/
 │   │       ├── ebook_parser.py  # 电子书解析
-│   │       ├── audio_converter.py # 音频转换
-│   │       └── task_queue.py    # 任务队列
-│   └── tests/                   # 测试文件
+│   │       ├── audio_converter.py # 音频转换（本地+在线）
+│   │       ├── mimo_tts.py      # 小米 MiMo TTS 客户端
+│   │       ├── task_queue.py    # 任务队列
+│   │       └── auth.py          # 认证服务
+│   └── tests/                   # 测试文件 (50+ 测试)
 ├── frontend/
 │   └── src/
 │       ├── App.jsx              # 主应用（路由+布局）
 │       ├── api.js               # API 客户端
+│       ├── AuthContext.jsx      # 认证上下文
 │       ├── pages/
 │       │   ├── BookList.jsx     # 图书列表页
-│       │   ├── BookDetail.jsx   # 图书详情页
-│       │   ├── TaskList.jsx     # 任务列表页
-│       │   └── Configuration.jsx # 配置页
+│       │   ├── BookDetail.jsx   # 图书详情页（含章节内容查看）
+│       │   ├── TaskList.jsx     # 任务列表页（支持分页）
+│       │   ├── VoicePresets.jsx # 语音预设页
+│       │   ├── Configuration.jsx # 配置页（TTS/分段/认证）
+│       │   └── Login.jsx        # 登录页
 │       └── components/
 │           └── AudioPlayer.jsx  # 全局浮动播放器
 ├── ios/
@@ -144,9 +193,15 @@ x-reader/
 │       ├── Services/            # 音频播放、录音、任务轮询
 │       ├── Storage/             # 服务器地址持久化
 │       └── Views/               # SwiftUI 视图
+├── models/
+│   ├── OmniVoice/               # 本地 TTS 模型
+│   └── whisper-large-v3-turbo/  # ASR 模型
 ├── data/
 │   ├── books/                   # 电子书存储
-│   └── audio/                   # 音频输出
+│   ├── audio/                   # 音频输出
+│   └── text/                    # 章节文本缓存
+├── docker-compose.yml           # Docker 编排
+├── Dockerfile                   # Docker 构建
 └── test_books/                  # 测试电子书
 ```
 
@@ -157,7 +212,7 @@ x-reader/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | /api/books/upload | 上传电子书 |
-| GET | /api/books | 图书列表 |
+| GET | /api/books | 图书列表（支持分页、搜索） |
 | GET | /api/books/{id} | 图书详情 |
 | DELETE | /api/books/{id} | 删除图书 |
 
@@ -166,14 +221,14 @@ x-reader/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | /api/books/{id}/chapters | 章节列表 |
-| GET | /api/chapters/{id} | 章节详情 |
+| GET | /api/chapters/{id} | 章节详情（含文本内容） |
 
 ### 任务
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | /api/tasks | 创建转换任务 |
-| GET | /api/tasks | 任务列表 |
+| GET | /api/tasks | 任务列表（支持分页、筛选） |
 | GET | /api/tasks/{id}/progress | 任务进度 |
 | POST | /api/tasks/{id}/retry | 重试任务 |
 | DELETE | /api/tasks/{id} | 取消任务 |
@@ -253,12 +308,14 @@ open ios/xReader.xcodeproj
 | 数据库 | SQLite |
 | 任务队列 | ThreadPoolExecutor |
 | 电子书解析 | zipfile + xml.etree (EPUB), PyMuPDF (PDF) |
-| TTS 引擎 | OmniVoice |
+| 本地 TTS | OmniVoice |
+| 在线 TTS | 小米 MiMo V2.5 API |
 | ASR 引擎 | Whisper (HuggingFace) |
 | 音频处理 | torchaudio + ffmpeg |
 | Web 前端 | React + Ant Design |
 | iOS 客户端 | SwiftUI (iOS 16+) |
 | 路由 | React Router |
+| 认证 | Challenge-Response + JWT |
 
 ## 测试
 
@@ -266,6 +323,8 @@ open ios/xReader.xcodeproj
 cd x-reader/backend
 PYTHONPATH=. pytest tests/ -v
 ```
+
+当前有 50+ 个测试用例，覆盖 API、认证、服务、电子书解析等模块。
 
 ## 常见问题
 
@@ -275,6 +334,7 @@ A:
 - 确保使用 GPU（CUDA）而非 CPU
 - 减少解码步数（num_step）可加快速度，但会降低质量
 - 文本会自动分段处理，长文本需要更多时间
+- 可以尝试在线 TTS 模式，减轻本地计算压力
 
 ### Q: 播放音频没有声音？
 
@@ -282,15 +342,24 @@ A:
 - 检查后端是否正常运行
 - 确认音频文件已生成
 - 浏览器可能不支持某些音频格式，推荐使用 MP3
+- 尝试刷新页面清除缓存
 
 ### Q: 如何使用语音克隆？
 
 A:
-1. 在配置页面创建新预设
+1. 在「语音预设」页面创建新预设
 2. 选择「语音克隆」模式
 3. 上传参考音频文件（几秒即可）
-4. 填写参考音频的转录文本
+4. 系统会自动转录参考文本（可手动修改）
 5. 保存预设并在转换时选择使用
+
+### Q: 在线 TTS 失败怎么办？
+
+A:
+- 检查 API Key 是否正确
+- 确认网络连接正常
+- 如果是「在线优先」模式，系统会自动回退到本地模型
+- 查看后端日志获取详细错误信息
 
 ## 许可证
 
