@@ -126,7 +126,7 @@ function BookList() {
           style={{ marginBottom: 16 }}
         />
         <Upload
-          accept=".epub,.pdf,.txt"
+          accept=".epub,.pdf,.txt,.mobi"
           showUploadList={false}
           beforeUpload={handleUpload}
         >

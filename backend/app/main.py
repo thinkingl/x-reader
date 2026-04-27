@@ -219,7 +219,7 @@ async def upload_book(
     _auth: bool = Depends(require_auth),
 ):
     ext = Path(file.filename).suffix.lower()
-    if ext not in [".epub", ".pdf", ".txt"]:
+    if ext not in [".epub", ".pdf", ".txt", ".mobi"]:
         raise HTTPException(400, "Unsupported file format")
 
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}

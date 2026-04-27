@@ -295,6 +295,112 @@ class TxtParser:
         }
 
 
+class MobiParser:
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+
+    def parse(self) -> Dict[str, Any]:
+        import mobi
+        import shutil
+
+        tempdir, filepath = mobi.extract(self.file_path)
+        try:
+            ext = Path(filepath).suffix.lower()
+            if ext == ".epub":
+                return EpubParser(filepath).parse()
+            elif ext in (".html", ".xhtml", ".htm"):
+                return self._parse_html(filepath)
+            elif ext == ".pdf":
+                return PdfParser(filepath).parse()
+            else:
+                raise ValueError(f"Unsupported extracted format: {ext}")
+        finally:
+            shutil.rmtree(tempdir, ignore_errors=True)
+
+    def _parse_html(self, html_path: str) -> Dict[str, Any]:
+        from bs4 import BeautifulSoup
+        import re
+
+        title = Path(self.file_path).stem
+
+        with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+
+        soup = BeautifulSoup(content, "html.parser")
+
+        # 尝试从 title 标签获取书名
+        title_tag = soup.find("title")
+        if title_tag and title_tag.string:
+            title = title_tag.string.strip()
+
+        # 尝试获取作者
+        author = None
+        author_tag = soup.find("meta", attrs={"name": "author"})
+        if author_tag:
+            author = author_tag.get("content")
+
+        # 章节标题模式
+        chapter_pattern = re.compile(
+            r'^(第.{1,10}[章节篇卷]|序|前言|后记|附录|目录|楔子|引子|尾声)'
+        )
+
+        # 按章节分割
+        chapters = []
+        current_chapter = None
+        current_text = []
+
+        for p in soup.find_all("p"):
+            text = p.get_text(strip=True)
+            if not text:
+                continue
+
+            # 检查是否是章节标题
+            if chapter_pattern.match(text):
+                # 保存之前的章节
+                if current_text:
+                    content = "\n".join(current_text).strip()
+                    if content and len(content) > 10:
+                        chapters.append({
+                            "chapter_number": len(chapters) + 1,
+                            "title": current_chapter or f"Chapter {len(chapters) + 1}",
+                            "text_content": content,
+                            "word_count": len(content),
+                        })
+                    current_text = []
+                current_chapter = text
+            else:
+                current_text.append(text)
+
+        # 添加最后一章
+        if current_text:
+            content = "\n".join(current_text).strip()
+            if content and len(content) > 10:
+                chapters.append({
+                    "chapter_number": len(chapters) + 1,
+                    "title": current_chapter or f"Chapter {len(chapters) + 1}",
+                    "text_content": content,
+                    "word_count": len(content),
+                })
+
+        # 如果没有按标题分割成功，尝试按段落分割
+        if not chapters:
+            full_text = soup.get_text(separator="\n", strip=True)
+            if full_text:
+                chapters.append({
+                    "chapter_number": 1,
+                    "title": title,
+                    "text_content": full_text,
+                    "word_count": len(full_text),
+                })
+
+        return {
+            "title": title,
+            "author": author,
+            "format": "mobi",
+            "chapters": chapters,
+        }
+
+
 def get_parser(file_path: str):
     ext = Path(file_path).suffix.lower()
     if ext == ".epub":
@@ -303,5 +409,7 @@ def get_parser(file_path: str):
         return PdfParser(file_path)
     elif ext == ".txt":
         return TxtParser(file_path)
+    elif ext == ".mobi":
+        return MobiParser(file_path)
     else:
         raise ValueError(f"Unsupported file format: {ext}")
