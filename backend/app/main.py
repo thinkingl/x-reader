@@ -129,6 +129,13 @@ def startup():
         db.commit()
         logger.info(f"已修复 {len(queued_chapters)} 个排队状态异常的章节")
 
+    # 重新提交 QUEUED 状态的任务到线程池
+    queued_tasks = db.query(Task).filter(Task.status == TaskStatus.QUEUED).all()
+    for task in queued_tasks:
+        task_queue.submit_task(task.id, db)
+    if queued_tasks:
+        logger.info(f"已重新提交 {len(queued_tasks)} 个排队中的任务")
+
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}
     db.close()
 
@@ -803,6 +810,11 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool
     if "local_chunk_size" in update_data:
         if task_queue.converter:
             task_queue.converter.chunk_size = int(update_data["local_chunk_size"])
+
+    # 重新配置在线 TTS（如果相关配置变更）
+    tts_config_keys = ["tts_mode", "mimo_api_key", "mimo_base_url", "online_chunk_size"]
+    if any(key in update_data for key in tts_config_keys):
+        task_queue.configure_online_tts()
 
     return get_config(db)
 
