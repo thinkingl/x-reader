@@ -12,6 +12,7 @@ import logging
 import urllib.parse
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 from app.database import get_db, init_db
 from app.models.database import Book, Chapter, Task, VoicePreset, SystemConfig, TaskStatus
@@ -154,6 +155,15 @@ def startup():
     
     # 配置在线 TTS
     task_queue.configure_online_tts()
+
+    # 从配置读取并发数并更新
+    concurrency = int(configs.get("concurrency", "1"))
+    if concurrency != task_queue.max_workers:
+        task_queue.max_workers = concurrency
+        old_executor = task_queue.executor
+        task_queue.executor = ThreadPoolExecutor(max_workers=concurrency)
+        old_executor.shutdown(wait=False)
+        logger.info(f"并发数设置为: {concurrency}")
 
 
 @app.on_event("shutdown")
