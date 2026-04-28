@@ -13,3 +13,8 @@ struct ChapterResponse: Codable, Identifiable {
     let created_at: String
     let updated_at: String
 }
+
+struct ChapterUpdate: Codable {
+    let title: String?
+    let text_content: String?
+}

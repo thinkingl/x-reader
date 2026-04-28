@@ -8,6 +8,8 @@ enum APIEndpoints {
     static func book(_ id: Int) -> String { "/api/books/\(id)" }
     static func chapters(bookId: Int) -> String { "/api/books/\(bookId)/chapters" }
     static func chapter(_ id: Int) -> String { "/api/chapters/\(id)" }
+    static func deleteChapter(_ id: Int) -> String { "/api/chapters/\(id)" }
+    static func reparseBook(_ id: Int) -> String { "/api/books/\(id)/reparse" }
 
     // Tasks
     static let tasks = "/api/tasks"

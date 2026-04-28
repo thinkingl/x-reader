@@ -18,3 +18,13 @@ struct BookList: Codable {
     let items: [BookResponse]
     let total: Int
 }
+
+struct BookUpdate: Codable {
+    let title: String?
+    let author: String?
+}
+
+struct ReparseResponse: Codable {
+    let message: String
+    let chapter_count: Int
+}

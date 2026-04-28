@@ -17,6 +17,14 @@ struct BookDetailView: View {
     @State private var viewingChapter: ChapterResponse?
     @StateObject private var polling = TaskPollingService()
 
+    @State private var showEditBook = false
+    @State private var editTitle = ""
+    @State private var editAuthor = ""
+    @State private var showReparseAlert = false
+    @State private var isReparsing = false
+    @State private var deleteChapterId: Int?
+    @State private var showDeleteChapterAlert = false
+
     var body: some View {
         List {
             if let book {
@@ -62,7 +70,7 @@ struct BookDetailView: View {
                             Task { await playChapter(chapter) }
                         },
                         onConvert: {
-                            Task { await convertChapters([chapter]) }
+                            Task { await convertChapters([chapter], force: true) }
                         },
                         onDownload: {
                             Task { await downloadChapter(chapter) }
@@ -72,6 +80,14 @@ struct BookDetailView: View {
                         },
                         baseURL: client.baseURL
                     )
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            deleteChapterId = chapter.id
+                            showDeleteChapterAlert = true
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
                 }
             }
         }
@@ -85,6 +101,24 @@ struct BookDetailView: View {
                 )
             }
         }
+        .sheet(isPresented: $showEditBook) {
+            NavigationStack {
+                Form {
+                    TextField("书名", text: $editTitle)
+                    TextField("作者", text: $editAuthor)
+                }
+                .navigationTitle("编辑图书信息")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { showEditBook = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存") { Task { await saveBookInfo() } }
+                    }
+                }
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack {
@@ -94,7 +128,7 @@ struct BookDetailView: View {
                             Task { await convertChapters(selected) }
                         }
                     }
-                    
+
                     if chapters.contains(where: { $0.status == "completed" }) {
                         Button {
                             Task { await downloadBookAudio() }
@@ -102,6 +136,24 @@ struct BookDetailView: View {
                             Image(systemName: "arrow.down.circle")
                         }
                     }
+                }
+            }
+            ToolbarItem(placement: .navigationBarLeading) {
+                HStack {
+                    Button {
+                        editTitle = book?.title ?? ""
+                        editAuthor = book?.author ?? ""
+                        showEditBook = true
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+
+                    Button {
+                        showReparseAlert = true
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(isReparsing)
                 }
             }
         }
@@ -114,6 +166,24 @@ struct BookDetailView: View {
             Button("确定") { errorMessage = nil }
         } message: {
             if let msg = errorMessage { Text(msg) }
+        }
+        .alert("重新解析图书", isPresented: $showReparseAlert) {
+            Button("取消", role: .cancel) {}
+            Button("确认重新解析", role: .destructive) {
+                Task { await reparseBook() }
+            }
+        } message: {
+            Text("此操作将删除所有章节和任务，重新从电子书文件解析。确定继续吗？")
+        }
+        .alert("删除章节", isPresented: $showDeleteChapterAlert) {
+            Button("取消", role: .cancel) { deleteChapterId = nil }
+            Button("删除", role: .destructive) {
+                if let id = deleteChapterId {
+                    Task { await deleteChapter(id) }
+                }
+            }
+        } message: {
+            Text("确定要删除此章节吗？此操作不可撤销。")
         }
         .safeAreaInset(edge: .bottom) {
             if player.isPlaying {
@@ -147,6 +217,49 @@ struct BookDetailView: View {
         }
     }
 
+    private func saveBookInfo() async {
+        do {
+            let update = BookUpdate(
+                title: editTitle.isEmpty ? nil : editTitle,
+                author: editAuthor.isEmpty ? nil : editAuthor
+            )
+            let updated: BookResponse = try await client.patch(APIEndpoints.book(bookId), body: update)
+            book = updated
+            showEditBook = false
+        } catch {
+            errorMessage = "保存失败: \(error.localizedDescription)"
+        }
+    }
+
+    private func reparseBook() async {
+        isReparsing = true
+        defer { isReparsing = false }
+        do {
+            let _: ReparseResponse = try await client.post(APIEndpoints.reparseBook(bookId))
+            await loadData()
+        } catch {
+            errorMessage = "重新解析失败: \(error.localizedDescription)"
+        }
+    }
+
+    private func deleteChapter(_ chapterId: Int) async {
+        do {
+            let _: [String: String] = try await client.delete(APIEndpoints.deleteChapter(chapterId))
+            chapters.removeAll { $0.id == chapterId }
+            selectedChapterIds.remove(chapterId)
+            if let book {
+                self.book = BookResponse(
+                    id: book.id, title: book.title, author: book.author,
+                    format: book.format, file_path: book.file_path, cover_path: book.cover_path,
+                    chapter_count: max(0, book.chapter_count - 1), status: book.status,
+                    publish_year: book.publish_year, created_at: book.created_at, updated_at: book.updated_at
+                )
+            }
+        } catch {
+            errorMessage = "删除章节失败: \(error.localizedDescription)"
+        }
+    }
+
     private func progressForChapter(_ chapterId: Int) -> TaskProgress? {
         for (_, progress) in polling.activeTasks {
             if progress.message.contains("#\(chapterId)") || progress.task_id == chapterId {
@@ -156,7 +269,7 @@ struct BookDetailView: View {
         return nil
     }
 
-    private func convertChapters(_ chapters: [ChapterResponse], skipCompleted: Bool = false) async {
+    private func convertChapters(_ chapters: [ChapterResponse], skipCompleted: Bool = false, force: Bool? = nil) async {
         isConverting = true
         defer { isConverting = false }
         do {
@@ -171,7 +284,8 @@ struct BookDetailView: View {
             let body = TaskCreate(
                 book_id: bookId,
                 chapter_ids: targetIds,
-                voice_preset_id: selectedPresetId
+                voice_preset_id: selectedPresetId,
+                force: force
             )
             let _: TaskResponse = try await client.post(APIEndpoints.tasks, body: body)
 
@@ -280,11 +394,9 @@ struct BookDetailView: View {
                 return
             }
 
-            // 从响应头获取文件名，或使用默认扩展名
             var fileExtension = ".mp3"
             if let httpResponse = response as? HTTPURLResponse,
                let contentDisposition = httpResponse.allHeaderFields["Content-Disposition"] as? String {
-                // 尝试从Content-Disposition头解析文件名
                 if let filename = contentDisposition.components(separatedBy: "filename=").last?.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) {
                     fileExtension = (filename as NSString).pathExtension.isEmpty ? ".mp3" : ".\((filename as NSString).pathExtension)"
                 }
@@ -370,7 +482,7 @@ struct ChapterRow: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                
+
                 if chapter.status == "completed" && !isConverting {
                     Button { onPlay() } label: {
                         Image(systemName: "play.circle.fill")
@@ -378,7 +490,7 @@ struct ChapterRow: View {
                             .foregroundStyle(.blue)
                     }
                     .buttonStyle(.plain)
-                    
+
                     Button { onDownload() } label: {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.title2)

@@ -13,6 +13,7 @@ struct TaskCreate: Codable {
     let book_id: Int
     let chapter_ids: [Int]?
     let voice_preset_id: Int?
+    let force: Bool?
 }
 
 struct TaskResponse: Codable, Identifiable {

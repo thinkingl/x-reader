@@ -7,6 +7,7 @@ x-reader: 电子书 → 有声读物转换系统，基于 OmniVoice TTS
 - `backend/` — Python FastAPI + SQLite + pytest
 - `frontend/` — React 19 + Ant Design 6 + Vite 8 + ESLint (无 TypeScript)
 - `ios/` — Swift + SwiftUI (Xcode 项目)
+- `android/` — Kotlin + Jetpack Compose + Material 3 (Android 项目)
 - `models/` — 预训练模型 (OmniVoice TTS + whisper-large-v3-turbo ASR)
 
 ## Backend
@@ -63,6 +64,24 @@ xcodebuild -project ios/xReader.xcodeproj -scheme xReader -destination 'platform
 - Audio: `AVPlayer` + `MPRemoteCommandCenter`
 - LSP errors on macOS expected (iOS-specific APIs)
 
+## Android
+
+```bash
+cd android
+./gradlew assembleDebug   # 构建 debug APK
+./gradlew assembleRelease # 构建 release APK
+```
+
+### Architecture
+- Tech stack: Kotlin, Jetpack Compose, Material 3, Retrofit, OkHttp, Hilt, Media3 ExoPlayer
+- Min SDK 26, Target SDK 34
+- Server URL stored in DataStore, auth token in EncryptedSharedPreferences
+- Adaptive layout: `WindowSizeClass` — phone 单面板, tablet 双面板 (列表+详情)
+- API via Retrofit + OkHttp interceptors (动态 base URL + JWT auth)
+- Audio: Media3 ExoPlayer + MediaSession (通知栏+锁屏控制)
+- Navigation: Navigation Compose, 底部导航栏 (phone) / NavigationRail (tablet)
+- DI: Hilt, ViewModels with StateFlow
+
 ## Docker
 
 ```bash
@@ -88,6 +107,7 @@ docker-compose down    # 停止服务
 - 在线 TTS 支持：小米 MiMo V2.5 API，支持在线优先+失败回退
 - 任务状态管理：pending → queued → running → completed/failed
 - 任务列表后端分页，章节内容查看，播放缓存修复
+- Android Kotlin/Jetpack Compose 客户端（自适应布局，支持手机和平板）
 
 ### 待修复
 - PDF 按目录书签分章
