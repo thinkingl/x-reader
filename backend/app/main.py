@@ -95,47 +95,33 @@ def startup():
     # Read config from database
     db = next(get_db())
 
-    # Reset stuck tasks from previous session
-    stuck_tasks = db.query(Task).filter(Task.status == TaskStatus.RUNNING).all()
-    for task in stuck_tasks:
-        task.status = TaskStatus.FAILED
-        task.error_message = "后端重启，任务中断"
-        task.finished_at = datetime.utcnow()
-        # Reset corresponding chapter status
-        chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
-        if chapter and chapter.status == "converting":
-            chapter.status = "pending"
-    if stuck_tasks:
+    # 后端重启时，将中断的任务重新提交（而非标记失败）
+    # 1. RUNNING 任务重置为 QUEUED（submit_task 会处理状态）
+    running_tasks = db.query(Task).filter(Task.status == TaskStatus.RUNNING).all()
+    for task in running_tasks:
+        task.status = TaskStatus.QUEUED
+        task.started_at = None
+        task.finished_at = None
+        task.error_message = None
+    if running_tasks:
         db.commit()
-        logger.info(f"已重置 {len(stuck_tasks)} 个中断的任务")
+        logger.info(f"已重置 {len(running_tasks)} 个中断的任务")
 
-    # Also reset any chapters stuck in converting status
+    # 2. 重置 stuck 的 converting 章节为 pending
     stuck_chapters = db.query(Chapter).filter(Chapter.status == "converting").all()
     for chapter in stuck_chapters:
         chapter.status = "pending"
     if stuck_chapters:
         db.commit()
-        logger.info(f"已重置 {len(stuck_chapters)} 个中断的章节")
 
-    # Fix chapters with queued status but no active task
-    queued_chapters = db.query(Chapter).filter(Chapter.status == "queued").all()
-    for chapter in queued_chapters:
-        active_task = db.query(Task).filter(
-            Task.chapter_id == chapter.id,
-            Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING])
-        ).first()
-        if not active_task:
-            chapter.status = "pending"
-    if queued_chapters:
-        db.commit()
-        logger.info(f"已修复 {len(queued_chapters)} 个排队状态异常的章节")
-
-    # 重新提交 QUEUED 状态的任务到线程池
-    queued_tasks = db.query(Task).filter(Task.status == TaskStatus.QUEUED).all()
-    for task in queued_tasks:
+    # 3. 重新提交所有 QUEUED + PENDING 任务
+    resubmit_tasks = db.query(Task).filter(
+        Task.status.in_([TaskStatus.QUEUED, TaskStatus.PENDING])
+    ).all()
+    for task in resubmit_tasks:
         task_queue.submit_task(task.id, db)
-    if queued_tasks:
-        logger.info(f"已重新提交 {len(queued_tasks)} 个排队中的任务")
+    if resubmit_tasks:
+        logger.info(f"已重新提交 {len(resubmit_tasks)} 个任务")
 
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}
     db.close()
