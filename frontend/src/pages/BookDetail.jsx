@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Table, Button, Select, message, Space, Tag, Card, Descriptions, Tooltip, Progress, Modal } from 'antd';
-import { PlayCircleOutlined, ReloadOutlined, AudioOutlined, SyncOutlined, ClockCircleOutlined, DownloadOutlined, EyeOutlined } from '@ant-design/icons';
+import { Table, Button, Select, message, Space, Tag, Card, Descriptions, Tooltip, Progress, Modal, Input, Form, Popconfirm } from 'antd';
+import { PlayCircleOutlined, ReloadOutlined, AudioOutlined, SyncOutlined, ClockCircleOutlined, DownloadOutlined, EyeOutlined, EditOutlined, SaveOutlined, DeleteOutlined, RedoOutlined } from '@ant-design/icons';
 import api from '../api';
 import { AudioContext } from '../components/AudioPlayer';
 
@@ -17,15 +17,24 @@ function BookDetail() {
   const [loading, setLoading] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
   const [downloadingChapter, setDownloadingChapter] = useState(null);
+  const [reparsing, setReparsing] = useState(false);
   const [taskProgress, setTaskProgress] = useState({});  // {taskId: {message, elapsed}}
   const { playAudio } = useContext(AudioContext);
   const progressInterval = useRef(null);
   
-  // 章节内容查看
+  // 图书编辑
+  const [editBookModalVisible, setEditBookModalVisible] = useState(false);
+  const [editBookForm] = Form.useForm();
+  const [editBookLoading, setEditBookLoading] = useState(false);
+
+  // 章节内容查看/编辑
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [viewChapter, setViewChapter] = useState(null);
   const [viewContent, setViewContent] = useState('');
   const [viewLoading, setViewLoading] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [isEditingContent, setIsEditingContent] = useState(false);
+  const [saveContentLoading, setSaveContentLoading] = useState(false);
 
   const handlePresetChange = (value) => {
     setSelectedPreset(value);
@@ -34,6 +43,66 @@ function BookDetail() {
     } else {
       localStorage.setItem('selectedPreset', value);
     }
+  };
+
+  const handleEditBook = () => {
+    editBookForm.setFieldsValue({ title: book.title, author: book.author });
+    setEditBookModalVisible(true);
+  };
+
+  const handleSaveBook = async () => {
+    try {
+      const values = await editBookForm.validateFields();
+      setEditBookLoading(true);
+      await api.patch(`/api/books/${id}`, values);
+      message.success('图书信息已更新');
+      setEditBookModalVisible(false);
+      fetchBook();
+    } catch (err) {
+      if (err.response) message.error('保存失败');
+    }
+    setEditBookLoading(false);
+  };
+
+  const handleViewChapter = async (chapter) => {
+    setViewChapter(chapter);
+    setViewModalVisible(true);
+    setIsEditingContent(false);
+    setViewLoading(true);
+    try {
+      const res = await api.get(`/api/chapters/${chapter.id}`);
+      const content = res.data.text_content || '';
+      setViewContent(content);
+      setEditContent(content);
+    } catch (err) {
+      message.error('获取章节内容失败');
+      setViewContent('');
+      setEditContent('');
+    }
+    setViewLoading(false);
+  };
+
+  const handleSaveChapterContent = async () => {
+    if (!viewChapter) return;
+    setSaveContentLoading(true);
+    try {
+      await api.patch(`/api/chapters/${viewChapter.id}`, { text_content: editContent });
+      message.success('章节内容已更新');
+      setViewContent(editContent);
+      setIsEditingContent(false);
+      fetchChapters();
+    } catch (err) {
+      message.error('保存失败');
+    }
+    setSaveContentLoading(false);
+  };
+
+  const handleCloseView = () => {
+    setViewModalVisible(false);
+    setViewChapter(null);
+    setViewContent('');
+    setEditContent('');
+    setIsEditingContent(false);
   };
 
   useEffect(() => {
@@ -116,7 +185,7 @@ function BookDetail() {
     } catch (err) {}
   };
 
-  const handleConvert = async (chapterIds = null) => {
+  const handleConvert = async (chapterIds = null, force = false) => {
     setLoading(true);
     try {
       const ids = chapterIds ? (Array.isArray(chapterIds) ? chapterIds : [chapterIds]) : null;
@@ -124,6 +193,7 @@ function BookDetail() {
         book_id: parseInt(id),
         chapter_ids: ids,
         voice_preset_id: selectedPreset,
+        force,
       });
       message.success('任务已创建');
 
@@ -177,31 +247,35 @@ function BookDetail() {
     }, 5000);
   };
 
+  const handleDeleteChapter = async (chapter) => {
+    try {
+      await api.delete(`/api/chapters/${chapter.id}`);
+      message.success('章节已删除');
+      fetchBook();
+      fetchChapters();
+    } catch (err) {
+      message.error('删除失败');
+    }
+  };
+
+  const handleReparse = async () => {
+    setReparsing(true);
+    try {
+      const res = await api.post(`/api/books/${id}/reparse`);
+      message.success(res.data.message);
+      fetchBook();
+      fetchChapters();
+    } catch (err) {
+      message.error('重新解析失败: ' + (err.response?.data?.detail || err.message));
+    }
+    setReparsing(false);
+  };
+
   const formatElapsed = (seconds) => {
     if (!seconds) return '';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return mins > 0 ? `${mins}m${secs}s` : `${secs}s`;
-  };
-
-  const handleViewChapter = async (chapter) => {
-    setViewChapter(chapter);
-    setViewModalVisible(true);
-    setViewLoading(true);
-    try {
-      const res = await api.get(`/api/chapters/${chapter.id}`);
-      setViewContent(res.data.text_content || '');
-    } catch (err) {
-      message.error('获取章节内容失败');
-      setViewContent('');
-    }
-    setViewLoading(false);
-  };
-
-  const handleCloseView = () => {
-    setViewModalVisible(false);
-    setViewChapter(null);
-    setViewContent('');
   };
 
   const columns = [
@@ -257,7 +331,7 @@ function BookDetail() {
     },
     {
       title: '操作',
-      width: 180,
+      width: 200,
       render: (_, record) => (
         <Space size={4}>
           <Tooltip title="查看内容">
@@ -307,7 +381,7 @@ function BookDetail() {
                   size="small"
                   type="link"
                   icon={<ReloadOutlined />}
-                  onClick={() => handleConvert(record.id)}
+                  onClick={() => handleConvert(record.id, true)}
                 />
               </Tooltip>
             </>
@@ -318,10 +392,22 @@ function BookDetail() {
                 size="small"
                 type="link"
                 icon={<ReloadOutlined />}
-                onClick={() => handleConvert(record.id)}
+                onClick={() => handleConvert(record.id, true)}
               />
             </Tooltip>
           )}
+          <Popconfirm
+            title="确定删除此章节？"
+            description="删除后相关任务和音频也会被删除"
+            onConfirm={() => handleDeleteChapter(record)}
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+          >
+            <Tooltip title="删除">
+              <Button size="small" type="link" danger icon={<DeleteOutlined />} />
+            </Tooltip>
+          </Popconfirm>
         </Space>
       ),
     },
@@ -331,7 +417,12 @@ function BookDetail() {
     <div>
       {book && (
         <Card style={{ marginBottom: 16 }}>
-          <Descriptions title="图书信息">
+          <Descriptions title={
+            <Space>
+              图书信息
+              <Button size="small" icon={<EditOutlined />} onClick={handleEditBook}>编辑</Button>
+            </Space>
+          }>
             <Descriptions.Item label="书名">{book.title}</Descriptions.Item>
             <Descriptions.Item label="作者">{book.author || '-'}</Descriptions.Item>
             <Descriptions.Item label="格式">{book.format}</Descriptions.Item>
@@ -361,6 +452,16 @@ function BookDetail() {
           转换全部未完成章节
         </Button>
         <Button onClick={() => fetchChapters()}>刷新</Button>
+        <Popconfirm
+          title="确定重新解析？"
+          description="重新解析将删除所有章节、任务和音频，从电子书文件重新提取文本"
+          onConfirm={handleReparse}
+          okText="确定"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+        >
+          <Button icon={<RedoOutlined />} loading={reparsing}>重新解析</Button>
+        </Popconfirm>
         <Button
           icon={<DownloadOutlined />}
           onClick={handleDownloadBook}
@@ -383,20 +484,52 @@ function BookDetail() {
         open={viewModalVisible}
         onCancel={handleCloseView}
         footer={[
-          <Button key="close" onClick={handleCloseView}>
-            关闭
-          </Button>
+          isEditingContent ? (
+            <Space key="edit">
+              <Button onClick={() => { setIsEditingContent(false); setEditContent(viewContent); }}>取消</Button>
+              <Button type="primary" icon={<SaveOutlined />} onClick={handleSaveChapterContent} loading={saveContentLoading}>保存</Button>
+            </Space>
+          ) : (
+            <Space key="view">
+              <Button icon={<EditOutlined />} onClick={() => setIsEditingContent(true)}>编辑</Button>
+              <Button onClick={handleCloseView}>关闭</Button>
+            </Space>
+          )
         ]}
         width={800}
         styles={{ body: { maxHeight: '60vh', overflowY: 'auto' } }}
       >
         {viewLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}>加载中...</div>
+        ) : isEditingContent ? (
+          <Input.TextArea
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            autoSize={{ minRows: 15, maxRows: 30 }}
+            style={{ fontSize: 14, lineHeight: 1.8 }}
+          />
         ) : (
           <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, fontSize: 14 }}>
             {viewContent || '无内容'}
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title="编辑图书信息"
+        open={editBookModalVisible}
+        onCancel={() => setEditBookModalVisible(false)}
+        onOk={handleSaveBook}
+        confirmLoading={editBookLoading}
+      >
+        <Form form={editBookForm} layout="vertical">
+          <Form.Item label="书名" name="title" rules={[{ required: true, message: '请输入书名' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item label="作者" name="author">
+            <Input />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

@@ -16,7 +16,7 @@ from datetime import datetime
 from app.database import get_db, init_db
 from app.models.database import Book, Chapter, Task, VoicePreset, SystemConfig, TaskStatus
 from app.schemas import (
-    BookCreate, BookResponse, BookList,
+    BookCreate, BookUpdate, BookResponse, BookList,
     ChapterResponse, ChapterUpdate,
     TaskCreate, TaskResponse, TaskList,
     VoicePresetCreate, VoicePresetUpdate, VoicePresetResponse, VoicePresetList,
@@ -288,6 +288,20 @@ def get_book(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(
     return book
 
 
+@app.patch("/api/books/{book_id}", response_model=BookResponse)
+def update_book(book_id: int, data: BookUpdate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+    if data.title is not None:
+        book.title = data.title
+    if data.author is not None:
+        book.author = data.author
+    db.commit()
+    db.refresh(book)
+    return book
+
+
 @app.delete("/api/books/{book_id}")
 def delete_book(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     book = db.query(Book).filter(Book.id == book_id).first()
@@ -334,9 +348,90 @@ def update_chapter(chapter_id: int, data: ChapterUpdate, db: Session = Depends(g
         raise HTTPException(404, "Chapter not found")
     if data.title is not None:
         chapter.title = data.title
+    if data.text_content is not None:
+        chapter.text_content = data.text_content
+        chapter.word_count = len(data.text_content)
     db.commit()
     db.refresh(chapter)
     return chapter
+
+
+@app.delete("/api/chapters/{chapter_id}")
+def delete_chapter(chapter_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
+    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    if not chapter:
+        raise HTTPException(404, "Chapter not found")
+
+    # 删除关联的任务
+    db.query(Task).filter(Task.chapter_id == chapter_id).delete()
+
+    # 删除音频文件
+    if chapter.audio_path and os.path.exists(chapter.audio_path):
+        try:
+            os.remove(chapter.audio_path)
+        except Exception:
+            pass
+
+    book = db.query(Book).filter(Book.id == chapter.book_id).first()
+    db.delete(chapter)
+    if book:
+        book.chapter_count = db.query(Chapter).filter(Chapter.book_id == book.id).count()
+    db.commit()
+
+    return {"message": "Chapter deleted"}
+
+
+@app.post("/api/books/{book_id}/reparse")
+def reparse_book(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+
+    file_path = book.file_path
+    if not os.path.exists(file_path):
+        raise HTTPException(400, "电子书文件不存在，无法重新解析")
+
+    # 删除旧章节和关联任务
+    old_chapters = db.query(Chapter).filter(Chapter.book_id == book_id).all()
+    for ch in old_chapters:
+        if ch.audio_path and os.path.exists(ch.audio_path):
+            try:
+                os.remove(ch.audio_path)
+            except Exception:
+                pass
+    db.query(Task).filter(Task.book_id == book_id).delete()
+    db.query(Chapter).filter(Chapter.book_id == book_id).delete()
+    db.commit()
+
+    # 重新解析
+    try:
+        parser = get_parser(file_path)
+        result = parser.parse()
+    except Exception as e:
+        raise HTTPException(400, f"重新解析失败: {str(e)}")
+
+    book.title = result["title"]
+    book.author = result["author"]
+    book.chapter_count = len(result["chapters"])
+    book.status = "parsed"
+
+    configs = {c.key: c.value for c in db.query(SystemConfig).all()}
+    text_dir = os.path.join(configs.get("book_dir", "data/books"), str(book_id), "text")
+    os.makedirs(text_dir, exist_ok=True)
+
+    for ch_data in result["chapters"]:
+        chapter = Chapter(
+            book_id=book.id,
+            chapter_number=ch_data["chapter_number"],
+            title=ch_data["title"],
+            text_content=ch_data["text_content"],
+            word_count=ch_data["word_count"],
+        )
+        db.add(chapter)
+
+    db.commit()
+
+    return {"message": f"重新解析完成，共 {len(result['chapters'])} 章", "chapter_count": len(result["chapters"])}
 
 
 @app.post("/api/tasks", response_model=TaskResponse)
@@ -354,8 +449,8 @@ def create_task(data: TaskCreate, db: Session = Depends(get_db), _auth: bool = D
 
     last_task = None
     for chapter in chapters:
-        # 跳过已完成的章节
-        if chapter.status == "completed":
+        # 非强制模式下，跳过已完成的章节
+        if not data.force and chapter.status == "completed":
             continue
         
         # 跳过已有活跃任务的章节
@@ -366,6 +461,13 @@ def create_task(data: TaskCreate, db: Session = Depends(get_db), _auth: bool = D
         if existing_task:
             continue
         
+        # 强制模式下重置章节状态
+        if data.force and chapter.status == "completed":
+            chapter.status = "pending"
+            chapter.audio_path = None
+            chapter.audio_duration = None
+            db.commit()
+
         task = Task(
             book_id=data.book_id,
             chapter_id=chapter.id,

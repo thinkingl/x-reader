@@ -43,6 +43,11 @@ class BookList(BaseModel):
     total: int
 
 
+class BookUpdate(BaseModel):
+    title: Optional[str] = None
+    author: Optional[str] = None
+
+
 # Chapter schemas
 class ChapterBase(BaseModel):
     chapter_number: int
@@ -52,6 +57,7 @@ class ChapterBase(BaseModel):
 
 class ChapterUpdate(BaseModel):
     title: Optional[str] = None
+    text_content: Optional[str] = None
 
 
 class ChapterResponse(ChapterBase):
@@ -73,6 +79,7 @@ class TaskCreate(BaseModel):
     book_id: int
     chapter_ids: Optional[List[int]] = None
     voice_preset_id: Optional[int] = None
+    force: bool = False
 
 
 class TaskResponse(BaseModel):
