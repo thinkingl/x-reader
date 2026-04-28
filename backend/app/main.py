@@ -906,8 +906,12 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool
     db.commit()
 
     if "concurrency" in update_data:
-        task_queue.max_workers = int(update_data["concurrency"])
-        task_queue.executor._max_workers = int(update_data["concurrency"])
+        new_workers = int(update_data["concurrency"])
+        task_queue.max_workers = new_workers
+        # ThreadPoolExecutor 不支持动态修改 max_workers，需要重建
+        old_executor = task_queue.executor
+        task_queue.executor = ThreadPoolExecutor(max_workers=new_workers)
+        old_executor.shutdown(wait=False)
 
     if "local_chunk_size" in update_data:
         if task_queue.converter:

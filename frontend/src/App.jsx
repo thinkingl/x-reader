@@ -8,7 +8,7 @@ import TaskList from './pages/TaskList';
 import VoicePresets from './pages/VoicePresets';
 import Configuration from './pages/Configuration';
 import LoginPage from './pages/Login';
-import AudioPlayer, { AudioProvider } from './components/AudioPlayer';
+import AudioPlayer, { AudioProvider, AudioContext } from './components/AudioPlayer';
 import { AuthProvider, useAuth } from './AuthContext';
 import './App.css';
 
@@ -17,6 +17,7 @@ const { Header, Sider, Content } = Layout;
 function AppContent() {
   const location = useLocation();
   const { isAuthEnabled, isAuthenticated, loading } = useAuth();
+  const { audioInfo } = React.useContext(AudioContext);
 
   if (loading) {
     return (
@@ -52,7 +53,7 @@ function AppContent() {
         <Header style={{ background: '#fff', padding: '0 24px' }}>
           <h2 style={{ margin: 0 }}>电子书转音频系统</h2>
         </Header>
-        <Content style={{ margin: '24px', padding: '24px', background: '#fff' }}>
+        <Content style={{ margin: '24px', padding: '24px', background: '#fff', paddingBottom: audioInfo ? '100px' : '24px' }}>
           <Routes>
             <Route path="/" element={<BookList />} />
             <Route path="/books/:id" element={<BookDetail />} />
