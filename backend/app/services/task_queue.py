@@ -152,11 +152,10 @@ class TaskQueue:
 
             self._update_progress(task_id, f"正在转换: {chapter.title[:20]}...", 0)
 
-            # Set progress callback
+            # Set progress callback - pass directly for thread safety
             def progress_cb(msg, progress=None):
                 self._update_progress(task_id, msg, progress)
 
-            self.converter.set_progress_callback(progress_cb)
             self.converter.chunk_size = chunk_size
 
             result = self.converter.convert_chapter(
@@ -171,6 +170,7 @@ class TaskQueue:
                 guidance_scale=guidance_scale,
                 speed=speed,
                 metadata=metadata,
+                progress_callback=progress_cb,
             )
 
             if os.path.exists(output_path):

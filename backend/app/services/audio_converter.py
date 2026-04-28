@@ -5,6 +5,7 @@ import torchaudio
 import numpy as np
 import time
 import re
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, List
 from datetime import datetime
@@ -24,6 +25,7 @@ class AudioConverter:
         self.model = None
         self.progress_callback: Optional[Callable] = None
         self.chunk_size = 200  # 每段文本的最大字符数
+        self._local = threading.local()  # 线程本地存储，用于并发安全的回调
         
         # 在线 TTS 配置
         self.tts_mode = "local"  # local | online | online_first
@@ -49,8 +51,9 @@ class AudioConverter:
                 logger.warning("在线 TTS 模式但未提供 API Key")
 
     def _report_progress(self, message: str, progress: float = None):
-        if self.progress_callback:
-            self.progress_callback(message, progress)
+        cb = getattr(self._local, 'progress_callback', None) or self.progress_callback
+        if cb:
+            cb(message, progress)
         logger.info(message)
 
     def _get_device(self, device: str) -> str:
@@ -172,17 +175,21 @@ class AudioConverter:
         speed: float = 1.0,
         metadata: Optional[Dict[str, Any]] = None,
         voice_id: Optional[str] = None,
+        progress_callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
         """
         转换章节文本为音频
         
         Args:
             voice_id: 在线 TTS 的语音 ID (如 "冰糖", "Mia")
+            progress_callback: 本次转换专用的进度回调（并发安全）
         """
+        # 优先使用传入的回调，否则用全局的
+        cb = progress_callback or self.progress_callback
+        self._local.progress_callback = cb
         start_time = time.time()
         
         if self.tts_mode == "online":
-            # 纯在线模式
             return self._convert_online(
                 text=text,
                 output_path=output_path,
