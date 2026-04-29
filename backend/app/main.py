@@ -591,6 +591,11 @@ def download_book_audio_zip(book_id: int, db: Session = Depends(get_db), _auth: 
         try:
             # 使用ZIP_STORED（不压缩）提高速度，mp3本身已压缩
             with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_STORED) as zip_file:
+                # 添加原始电子书文件
+                if book.file_path and os.path.exists(book.file_path):
+                    ebook_arcname = Path(book.file_path).name
+                    zip_file.write(book.file_path, ebook_arcname)
+
                 for chapter in chapters:
                     if os.path.exists(chapter.audio_path):
                         ext = Path(chapter.audio_path).suffix
