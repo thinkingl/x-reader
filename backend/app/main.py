@@ -18,7 +18,7 @@ from app.database import get_db, init_db
 from app.models.database import Book, Chapter, Task, VoicePreset, SystemConfig, TaskStatus
 from app.schemas import (
     BookCreate, BookUpdate, BookResponse, BookList,
-    ChapterResponse, ChapterUpdate,
+    ChapterResponse, ChapterUpdate, ChapterListItem, ChapterListResponse,
     TaskCreate, TaskResponse, TaskList,
     VoicePresetCreate, VoicePresetUpdate, VoicePresetResponse, VoicePresetList,
     ConfigUpdate, ConfigResponse,
@@ -325,10 +325,23 @@ def delete_book(book_id: int, db: Session = Depends(get_db), _auth: bool = Depen
     return {"message": "Book deleted"}
 
 
-@app.get("/api/books/{book_id}/chapters", response_model=List[ChapterResponse])
-def list_chapters(book_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
-    chapters = db.query(Chapter).filter(Chapter.book_id == book_id).order_by(Chapter.chapter_number).all()
-    return chapters
+@app.get("/api/books/{book_id}/chapters", response_model=ChapterListResponse)
+def list_chapters(
+    book_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _auth: bool = Depends(require_auth),
+):
+    query = db.query(Chapter).filter(Chapter.book_id == book_id).order_by(Chapter.chapter_number)
+    total = query.count()
+    chapters = query.offset((page - 1) * page_size).limit(page_size).all()
+    return ChapterListResponse(
+        items=[ChapterListItem.from_orm(ch) for ch in chapters],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @app.get("/api/chapters/{chapter_id}", response_model=ChapterResponse)
@@ -533,10 +546,16 @@ def cancel_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depen
     if task.status == TaskStatus.RUNNING:
         raise HTTPException(400, "Cannot cancel running task")
 
-    # 更新章节状态为 pending
+    # 更新章节状态：仅当没有其他活跃任务时才重置为 pending
     chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
     if chapter and chapter.status in ("queued", "converting"):
-        chapter.status = "pending"
+        active_tasks = db.query(Task).filter(
+            Task.chapter_id == task.chapter_id,
+            Task.id != task_id,
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING])
+        ).count()
+        if active_tasks == 0:
+            chapter.status = "pending"
 
     db.delete(task)
     db.commit()

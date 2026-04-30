@@ -22,7 +22,6 @@ function TaskList() {
   }, [statusFilter, bookFilter, pagination.current]);
 
   const fetchTasks = async () => {
-    setLoading(true);
     try {
       const params = {
         page: pagination.current,
@@ -31,7 +30,21 @@ function TaskList() {
       if (statusFilter) params.status = statusFilter;
       if (bookFilter) params.book_id = bookFilter;
       const res = await api.get('/api/tasks', { params });
-      setTasks(res.data.items);
+      // 增量更新：仅替换实际变化的任务
+      setTasks(prev => {
+        const prevMap = new Map(prev.map(t => [t.id, t]));
+        return res.data.items.map(item => {
+          const old = prevMap.get(item.id);
+          if (old
+            && old.status === item.status
+            && old.progress === item.progress
+            && !old.error_message
+          ) {
+            return old;
+          }
+          return item;
+        });
+      });
       setPagination(prev => ({ ...prev, total: res.data.total }));
 
       // Fetch chapter info for each task
@@ -239,7 +252,6 @@ function TaskList() {
         columns={columns}
         dataSource={tasks}
         rowKey="id"
-        loading={loading}
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,

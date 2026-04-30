@@ -9,6 +9,10 @@ function BookDetail() {
   const { id } = useParams();
   const [book, setBook] = useState(null);
   const [chapters, setChapters] = useState([]);
+  const [totalChapters, setTotalChapters] = useState(0);
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(50);
+  const [hasRunningChapters, setHasRunningChapters] = useState(false);
   const [presets, setPresets] = useState([]);
   const [selectedPreset, setSelectedPreset] = useState(() => {
     const saved = localStorage.getItem('selectedPreset');
@@ -18,9 +22,10 @@ function BookDetail() {
   const [downloadingZip, setDownloadingZip] = useState(false);
   const [downloadingChapter, setDownloadingChapter] = useState(null);
   const [reparsing, setReparsing] = useState(false);
-  const [taskProgress, setTaskProgress] = useState({});  // {taskId: {message, elapsed}}
+  const [taskProgress, setTaskProgress] = useState({});
   const { playAudio } = useContext(AudioContext);
   const progressInterval = useRef(null);
+  const pollInterval = useRef(null);
   
   // 图书编辑
   const [editBookModalVisible, setEditBookModalVisible] = useState(false);
@@ -90,7 +95,7 @@ function BookDetail() {
       message.success('章节内容已更新');
       setViewContent(editContent);
       setIsEditingContent(false);
-      fetchChapters();
+      fetchChapters(1);
     } catch (err) {
       message.error('保存失败');
     }
@@ -107,26 +112,46 @@ function BookDetail() {
 
   useEffect(() => {
     fetchBook();
-    fetchChapters();
+    fetchChapters(1);
     fetchPresets();
 
-    // 定期刷新章节状态（每2秒）
-    const chapterInterval = setInterval(fetchChapters, 2000);
-
     return () => {
-      clearInterval(chapterInterval);
-      if (progressInterval.current) {
-        clearInterval(progressInterval.current);
-      }
+      if (pollInterval.current) clearInterval(pollInterval.current);
+      if (progressInterval.current) clearInterval(progressInterval.current);
     };
   }, [id]);
 
-  // Poll for progress when there are running tasks
+  // 智能轮询：有 pending/queued/running 状态章节时才每 2 秒刷新
   useEffect(() => {
-    const runningChapters = chapters.filter(c => c.status === 'converting');
-    if (runningChapters.length > 0 && !progressInterval.current) {
+    const activeChapters = chapters.filter(
+      c => c.status === 'pending' || c.status === 'queued' || c.status === 'converting'
+    );
+    const hasActive = activeChapters.length > 0;
+
+    if (hasActive && !pollInterval.current) {
+      pollInterval.current = setInterval(() => fetchChapters(), 2000);
+    } else if (!hasActive && pollInterval.current) {
+      clearInterval(pollInterval.current);
+      pollInterval.current = null;
+    }
+    if (hasActive !== hasRunningChapters) {
+      setHasRunningChapters(hasActive);
+    }
+
+    return () => {
+      if (pollInterval.current) {
+        clearInterval(pollInterval.current);
+        pollInterval.current = null;
+      }
+    };
+  }, [chapters]);
+
+  // Poll for progress when there are converting chapters
+  useEffect(() => {
+    const converting = chapters.filter(c => c.status === 'converting');
+    if (converting.length > 0 && !progressInterval.current) {
       progressInterval.current = setInterval(fetchTaskProgress, 1000);
-    } else if (runningChapters.length === 0 && progressInterval.current) {
+    } else if (converting.length === 0 && progressInterval.current) {
       clearInterval(progressInterval.current);
       progressInterval.current = null;
     }
@@ -136,7 +161,7 @@ function BookDetail() {
         progressInterval.current = null;
       }
     };
-  }, [chapters]);
+  }, [hasRunningChapters, chapters]);
 
   const fetchBook = async () => {
     try {
@@ -147,10 +172,28 @@ function BookDetail() {
     }
   };
 
-  const fetchChapters = async () => {
+  const fetchChapters = async (page = tablePage, pageSize = tablePageSize) => {
     try {
-      const res = await api.get(`/api/books/${id}/chapters`);
-      setChapters(res.data);
+      const res = await api.get(`/api/books/${id}/chapters`, {
+        params: { page, page_size: pageSize },
+      });
+      setTotalChapters(res.data.total);
+      // 增量更新：仅替换实际变化的章节，未变化的保留旧引用以避免重渲染
+      setChapters(prev => {
+        const prevMap = new Map(prev.map(c => [c.id, c]));
+        return res.data.items.map(item => {
+          const old = prevMap.get(item.id);
+          if (old
+            && old.status === item.status
+            && old.audio_path === item.audio_path
+            && old.audio_duration === item.audio_duration
+            && old.word_count === item.word_count
+          ) {
+            return old;
+          }
+          return item;
+        });
+      });
     } catch (err) {
       message.error('获取章节列表失败');
     }
@@ -180,7 +223,7 @@ function BookDetail() {
 
       // Refresh chapters if any task completed
       if (Object.keys(progressMap).length === 0 && Object.keys(taskProgress).length > 0) {
-        fetchChapters();
+        fetchChapters(1);
       }
     } catch (err) {}
   };
@@ -199,7 +242,8 @@ function BookDetail() {
 
       // 延迟后刷新章节状态（等待任务开始执行）
       setTimeout(() => {
-        fetchChapters();
+        setTablePage(1);
+        fetchChapters(1);
       }, 500);
     } catch (err) {
       message.error('创建任务失败');
@@ -252,7 +296,8 @@ function BookDetail() {
       await api.delete(`/api/chapters/${chapter.id}`);
       message.success('章节已删除');
       fetchBook();
-      fetchChapters();
+      setTablePage(1);
+      fetchChapters(1);
     } catch (err) {
       message.error('删除失败');
     }
@@ -264,7 +309,8 @@ function BookDetail() {
       const res = await api.post(`/api/books/${id}/reparse`);
       message.success(res.data.message);
       fetchBook();
-      fetchChapters();
+      setTablePage(1);
+      fetchChapters(1);
     } catch (err) {
       message.error('重新解析失败: ' + (err.response?.data?.detail || err.message));
     }
@@ -451,7 +497,7 @@ function BookDetail() {
         >
           转换全部未完成章节
         </Button>
-        <Button onClick={() => fetchChapters()}>刷新</Button>
+        <Button onClick={() => { setTablePage(1); fetchChapters(1); }}>刷新</Button>
         <Popconfirm
           title="确定重新解析？"
           description="重新解析将删除所有章节、任务和音频，从电子书文件重新提取文本"
@@ -476,7 +522,19 @@ function BookDetail() {
         columns={columns}
         dataSource={chapters}
         rowKey="id"
-        pagination={false}
+        pagination={{
+          current: tablePage,
+          pageSize: tablePageSize,
+          total: totalChapters,
+          showSizeChanger: true,
+          pageSizeOptions: ['20', '50', '100', '200'],
+          showTotal: (total, range) => `${range[0]}-${range[1]} / ${total} 章`,
+          onChange: (page, pageSize) => {
+            setTablePage(page);
+            setTablePageSize(pageSize);
+            fetchChapters(page, pageSize);
+          },
+        }}
       />
 
       <Modal

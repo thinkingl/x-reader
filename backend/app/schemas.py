@@ -74,6 +74,31 @@ class ChapterResponse(ChapterBase):
         from_attributes = True
 
 
+class ChapterListItem(BaseModel):
+    """轻量章节（不含 text_content，用于列表展示）"""
+    id: int
+    book_id: int
+    chapter_number: int
+    title: Optional[str]
+    word_count: int
+    audio_path: Optional[str]
+    audio_duration: Optional[float]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ChapterListResponse(BaseModel):
+    """分页的章节列表"""
+    items: List[ChapterListItem]
+    total: int
+    page: int
+    page_size: int
+
+
 # Task schemas
 class TaskCreate(BaseModel):
     book_id: int
