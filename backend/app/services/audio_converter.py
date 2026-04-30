@@ -17,11 +17,13 @@ logger = logging.getLogger(__name__)
 
 class AudioConverter:
     def __init__(self, model_path: str, device: str = "auto", precision: str = "float16",
-                 asr_model_path: str = "openai/whisper-large-v3-turbo"):
+                 asr_model_path: str = "openai/whisper-large-v3-turbo",
+                 allow_download: bool = False):
         self.model_path = model_path
         self.device = self._get_device(device)
         self.precision = precision
         self.asr_model_path = asr_model_path
+        self.allow_download = allow_download
         self.model = None
         self.progress_callback: Optional[Callable] = None
         self.chunk_size = 200  # 每段文本的最大字符数
@@ -67,6 +69,14 @@ class AudioConverter:
 
     def load_model(self):
         if self.model is None:
+            if not self.allow_download:
+                model_file = os.path.join(self.model_path, "model.safetensors")
+                if not os.path.isfile(model_file):
+                    raise FileNotFoundError(
+                        f"本地模型文件不存在: {model_file}\n"
+                        f"请先下载模型到 {self.model_path}，或设置环境变量 ALLOW_MODEL_DOWNLOAD=true 允许在线下载"
+                    )
+
             from omnivoice import OmniVoice
             dtype = torch.float16 if self.precision == "float16" else torch.float32
             self._report_progress(f"正在加载模型: {self.model_path} (设备: {self.device})")

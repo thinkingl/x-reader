@@ -130,12 +130,14 @@ def startup():
     device = configs.get("device", "auto")
     precision = configs.get("precision", "float16")
     asr_model_path = configs.get("asr_model_path", LOCAL_ASR_MODEL_PATH)
+    allow_download = os.environ.get("ALLOW_MODEL_DOWNLOAD", "").lower() in ("true", "1", "yes")
 
     converter = AudioConverter(
         model_path=model_path,
         device=device,
         precision=precision,
         asr_model_path=asr_model_path,
+        allow_download=allow_download,
     )
     task_queue.set_converter(converter)
     
@@ -790,6 +792,15 @@ async def upload_reference_audio(
         # 本地Whisper模型路径
         model_id = LOCAL_ASR_MODEL_PATH
         
+        allow_download = os.environ.get("ALLOW_MODEL_DOWNLOAD", "").lower() in ("true", "1", "yes")
+        if not allow_download:
+            asr_weights = os.path.join(model_id, "model.safetensors")
+            if not os.path.isfile(asr_weights):
+                raise FileNotFoundError(
+                    f"本地 ASR 模型文件不存在: {asr_weights}\n"
+                    f"请先下载模型到 {model_id}，或设置环境变量 ALLOW_MODEL_DOWNLOAD=true 允许在线下载"
+                )
+        
         logger.info(f"使用本地Whisper ASR模型: {model_id}, 设备: {device}")
         
         # 加载模型和处理器
@@ -798,10 +809,11 @@ async def upload_reference_audio(
             torch_dtype=torch_dtype,
             low_cpu_mem_usage=True,
             use_safetensors=True,
+            local_files_only=not allow_download,
         )
         model.to(device)
         
-        processor = AutoProcessor.from_pretrained(model_id)
+        processor = AutoProcessor.from_pretrained(model_id, local_files_only=not allow_download)
         
         # 创建pipeline
         asr_pipeline = pipeline(

@@ -1,6 +1,8 @@
 FROM cuda-ubuntu:22.04-dev
 
-# Install system dependencies
+# Install system dependencies (use HTTP proxy for apt)
+ENV http_proxy=http://172.16.195.148:8118
+ENV https_proxy=http://172.16.195.148:8118
 RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-dev \
@@ -8,19 +10,35 @@ RUN apt-get update && apt-get install -y \
     git \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+ENV http_proxy=
+ENV https_proxy=
 
 # Install Node.js 20.x
+ENV http_proxy=http://172.16.195.148:8118
+ENV https_proxy=http://172.16.195.148:8118
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
+ENV http_proxy=
+ENV https_proxy=
 
 WORKDIR /app
+
+# pip: use Nexus proxies
+RUN mkdir -p /root/.config/pip && \
+    printf '[global]\nindex-url = http://172.16.240.100:8081/repository/pypi-proxy/simple/\ntrusted-host = 172.16.240.100\ntimeout = 600\n' > /root/.config/pip/pip.conf
 
 # Copy backend requirements
 COPY backend/requirements.txt /app/backend/requirements.txt
 
-# Install minimal Python dependencies (torch and omnivoice will be installed at runtime)
-RUN pip3 install --no-cache-dir \
+# Install torch/torchaudio first (large packages, need long timeout, from pytorch-proxy)
+RUN pip3 install --no-deps \
+    --extra-index-url http://172.16.240.100:8081/repository/pytorch-proxy/simple/ \
+    torch==2.4.1+cu124 \
+    torchaudio==2.4.1+cu124
+
+# Install remaining Python dependencies (from pypi-proxy)
+RUN pip3 install \
     fastapi>=0.104.0 \
     uvicorn>=0.24.0 \
     sqlalchemy>=2.0.0 \
@@ -31,7 +49,8 @@ RUN pip3 install --no-cache-dir \
     mutagen>=1.47.0 \
     pytest>=7.4.0 \
     httpx>=0.25.0 \
-    PyJWT>=2.8.0
+    PyJWT>=2.8.0 \
+    omnivoice
 
 # Copy frontend package.json and install dependencies
 COPY frontend/package.json /app/frontend/package.json
@@ -45,7 +64,6 @@ RUN mkdir -p /app/data/books /app/data/audio /app/data/reference
 
 # Set environment variables
 ENV PYTHONPATH=/app/backend
-ENV NODE_ENV=production
 
 # Expose ports
 EXPOSE 8000 5173
