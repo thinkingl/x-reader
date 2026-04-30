@@ -68,6 +68,20 @@ def split_text_into_chapters(text: str) -> List[Dict[str, str]]:
 # 圆圈数字注解正则
 _CIRCLED_RE = re.compile(r'[①②③④⑤⑥⑦⑧⑨⑩]')
 
+# TTS 不友好的符号，替换为空格
+_TTS_NONSPEECH_RE = re.compile(r'[《》〈〉「」『』【】〖〗]')
+
+# 多余空白行
+_MULTI_BLANK_RE = re.compile(r'\n{3,}')
+
+
+def sanitize_text(text: str) -> str:
+    """清理 TTS 不适用的符号，规范化空白"""
+    text = _TTS_NONSPEECH_RE.sub(' ', text)
+    text = _MULTI_BLANK_RE.sub('\n\n', text)
+    text = text.strip()
+    return text
+
 
 def inline_annotations(text: str) -> str:
     """
@@ -368,9 +382,9 @@ class EpubParser:
                             "word_count": len(text),
                         })
 
-        # 处理圆圈数字注解，内联为 (注: xxx)
+        # 处理圆圈数字注解内联 + TTS 符号清理
         for ch in chapters:
-            ch["text_content"] = inline_annotations(ch["text_content"])
+            ch["text_content"] = sanitize_text(inline_annotations(ch["text_content"]))
             ch["word_count"] = len(ch["text_content"])
 
         return {
