@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Form, Input, Select, InputNumber, Button, Card, message, Alert, Spin, Switch, Typography, Divider, Tabs, Tag, Space, Tooltip } from 'antd';
-import { PlayCircleOutlined, PauseCircleOutlined, AudioOutlined, LockOutlined, UnlockOutlined, CloudOutlined, DesktopOutlined, SettingOutlined, ExperimentOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, PauseCircleOutlined, AudioOutlined, LockOutlined, UnlockOutlined, CloudOutlined, DesktopOutlined, SettingOutlined, ExperimentOutlined, QuestionCircleOutlined, HourglassOutlined } from '@ant-design/icons';
 import api from '../api';
 import { useAuth } from '../AuthContext';
 
@@ -131,7 +131,9 @@ function Configuration() {
         formData.append('voice_preset_id', testPreset);
       }
 
-      const res = await api.post('/api/config/test', formData);
+      const res = await api.post('/api/config/test', formData, {
+        timeout: 600000,  // 10 分钟超时，适应慢速 GPU
+      });
       setTestResult(res.data);
       message.success(res.data.message);
     } catch (err) {
@@ -356,6 +358,20 @@ function Configuration() {
           extra="合并音频时，段落之间的静音间隔"
         >
           <InputNumber min={0.1} max={2.0} step={0.1} style={{ width: '100%' }} />
+        </Form.Item>
+
+        <Divider orientation="left">
+          <Space>
+            <HourglassOutlined /> 超时设置
+          </Space>
+        </Divider>
+
+        <Form.Item 
+          label="TTS 请求超时（秒）" 
+          name="tts_timeout"
+          extra="单次 TTS 请求/生成的最大等待时间。GPU 较弱时建议调大（如 300-600）"
+        >
+          <InputNumber min={30} max={3600} step={30} style={{ width: '100%' }} />
         </Form.Item>
 
         <Form.Item>

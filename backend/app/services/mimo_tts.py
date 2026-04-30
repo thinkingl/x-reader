@@ -33,9 +33,10 @@ class MiMoTTSClient:
         "Dean": "Dean",
     }
     
-    def __init__(self, api_key: str, base_url: Optional[str] = None):
+    def __init__(self, api_key: str, base_url: Optional[str] = None, timeout: int = 120):
         self.api_key = api_key
         self.base_url = base_url or self.BASE_URL
+        self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({
             "api-key": self.api_key,
@@ -51,6 +52,7 @@ class MiMoTTSClient:
         ref_audio_path: Optional[str] = None,
         ref_text: Optional[str] = None,
         audio_format: str = "wav",
+        speed: float = 1.0,
     ) -> bytes:
         """
         合成语音
@@ -75,7 +77,7 @@ class MiMoTTSClient:
             ref_text=ref_text,
         )
         
-        audio_config = {"format": audio_format}
+        audio_config = {"format": audio_format, "speed": speed}
         
         # 设置语音
         if voice_mode == "auto":
@@ -97,7 +99,7 @@ class MiMoTTSClient:
         response = self.session.post(
             f"{self.base_url}/chat/completions",
             json=payload,
-            timeout=120,
+            timeout=self.timeout,
         )
         
         if response.status_code != 200:

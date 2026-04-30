@@ -5,6 +5,212 @@ import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
+# 章节标题匹配模式
+_CHAPTER_NUM_RE = re.compile(
+    r'(?:'
+    r'第[0-9零一二三四五六七八九十百千万]+\s*[章节篇卷部]'  # 第X章
+    r'|第\s*\d+\s*[章节篇卷部]'  # 第 123 章
+    r'|Chapter\s+\d+'  # Chapter 123
+    r'|楔子|引子|尾声|终章|序言|前言|后记|附录|卷末|跋'  # 特殊标记
+    r')'
+)
+# 裸中文数字作为章节标记（单独成行，1-4个中文字符）
+_CHINESE_NUM_RE = re.compile(r'^[　\s]*([一二三四五六七八九十百]+)[　\s]*$')
+
+
+def split_text_into_chapters(text: str) -> List[Dict[str, str]]:
+    """将文本按章节标题拆分为多段，返回 [{title, content}, ...]"""
+    lines = text.split('\n')
+    segments = []  # [(title, start_line_idx)]
+    current_title = None
+    current_start = 0
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        
+        # 检查是否匹配章节标题模式
+        is_chapter_start = False
+        title = stripped
+        
+        if _CHAPTER_NUM_RE.match(stripped):
+            is_chapter_start = True
+        else:
+            num_match = _CHINESE_NUM_RE.match(stripped)
+            if num_match and 1 <= len(num_match.group(1)) <= 4:
+                # 裸中文数字：检查下一行是否有更多内容（避免误匹配正文中的数字）
+                is_chapter_start = True
+                title = num_match.group(1)
+
+        if is_chapter_start:
+            # 保存前一段
+            if current_title is not None:
+                content = '\n'.join(lines[current_start:i]).strip()
+                if content and len(content) > 10:
+                    segments.append({"title": current_title, "content": content})
+            elif i > current_start:
+                # 第一章之前的内容作为前言
+                preamble = '\n'.join(lines[current_start:i]).strip()
+                if preamble and len(preamble) > 10:
+                    segments.append({"title": "前言", "content": preamble})
+            
+            current_title = title
+            current_start = i + 1
+
+    # 最后一段
+    if current_title is not None:
+        content = '\n'.join(lines[current_start:]).strip()
+        if content and len(content) > 10:
+            segments.append({"title": current_title, "content": content})
+
+    return segments
+
+
+# 圆圈数字注解正则
+_CIRCLED_RE = re.compile(r'[①②③④⑤⑥⑦⑧⑨⑩]')
+
+
+def inline_annotations(text: str) -> str:
+    """
+    将文中的圆圈数字注解 (①, ②, ...) 替换为内联格式 (注: xxx)。
+    注解行从正文中移除。
+    """
+    if not _CIRCLED_RE.search(text):
+        return text
+    
+    # 1. 提取所有注解正文（行首圆圈数字后的内容）
+    annot_texts = []
+    lines = text.split('\n')
+    clean_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped and re.match(r'^[①②③④⑤⑥⑦⑧⑨⑩]', stripped):
+            # 去掉行首的圆圈数字，保留注解正文
+            annot_text = re.sub(r'^[①②③④⑤⑥⑦⑧⑨⑩]\s*', '', stripped)
+            annot_texts.append(annot_text)
+            # 注解行不加入正文
+        else:
+            clean_lines.append(line)
+    
+    if not annot_texts:
+        return text
+    
+    clean_text = '\n'.join(clean_lines)
+    
+    # 2. 找到所有内联引用标记（不在行首的圆圈数字）
+    inline_positions = []
+    for m in _CIRCLED_RE.finditer(clean_text):
+        # 确保不是行首（行首的是注解标题，已被移除）
+        if m.start() > 0 and clean_text[m.start()-1] != '\n':
+            inline_positions.append(m.start())
+    
+    if not inline_positions:
+        return clean_text
+    
+    # 3. 按位置倒序替换，避免位置偏移
+    result = list(clean_text)
+    for i, pos in enumerate(reversed(inline_positions)):
+        annot_idx = len(inline_positions) - 1 - i
+        if annot_idx < len(annot_texts):
+            replacement = f"(注: {annot_texts[annot_idx]})"
+            result[pos:pos+1] = list(replacement)
+    
+    return ''.join(result)
+
+
+def split_soup_into_chapters(soup, fallback_title: str = "Chapter") -> List[Dict[str, str]]:
+    """从 BeautifulSoup HTML 中按章节标记拆分。在文本拆分基础上，额外检测空的 <p>数字</p> 标题。"""
+    from bs4 import BeautifulSoup, Tag, NavigableString
+    
+    # 先尝试 HTML 级别拆分：检测 <p>裸数字</p> 和 <h1>-<h6> 标题
+    body = soup.find("body") or soup
+    sections = []  # [(title_node, content_start_node)]
+    current_title = fallback_title
+    content_nodes = []
+    found_headings = False
+    
+    head_tag = soup.find("head")
+    if head_tag:
+        head_tag.decompose()
+    
+    for element in body.find_all(True, recursive=False):
+        if element.name in ("head", "title", "meta", "link", "style", "script"):
+            continue
+        
+        tag_text = element.get_text(strip=True)
+        is_heading = False
+        
+        if element.name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            is_heading = _CHAPTER_NUM_RE.match(tag_text) is not None
+        elif len(tag_text) <= 4:
+            num_match = _CHINESE_NUM_RE.match(tag_text)
+            if num_match and 1 <= len(num_match.group(1)) <= 4:
+                is_heading = True
+        
+        if is_heading:
+            if content_nodes:
+                full_text = "\n".join(
+                    n.get_text(separator="\n", strip=True) if isinstance(n, Tag) else str(n).strip()
+                    for n in content_nodes
+                ).strip()
+                if full_text and len(full_text) > 10:
+                    sections.append({"title": current_title, "content": full_text})
+                content_nodes = []
+            current_title = tag_text
+            found_headings = True
+            continue
+        
+        content_nodes.append(element)
+    
+    # 最后一段
+    if content_nodes:
+        full_text = "\n".join(
+            n.get_text(separator="\n", strip=True) if isinstance(n, Tag) else str(n).strip()
+            for n in content_nodes
+        ).strip()
+        if full_text and len(full_text) > 10:
+            sections.append({"title": current_title, "content": full_text})
+    
+    if found_headings and len(sections) > 1:
+        return sections
+    
+    # HTML 级别未找到足够的标题，回退到文本级别拆分
+    text = body.get_text(separator="\n", strip=True)
+    return split_text_into_chapters(text)
+
+
+_GENERIC_TITLES = {"正文", "正文", "Chapter", "无标题", "Untitled"}
+
+
+def _get_chapter_title(soup, chapter_num: int) -> str:
+    """从 BeautifulSoup 中提取章节标题"""
+    title_tag = soup.find(["h1", "h2", "h3"])
+    if title_tag:
+        return title_tag.get_text(strip=True)
+    html_title_tag = soup.find("title")
+    if html_title_tag and html_title_tag.string:
+        t = html_title_tag.string.strip()
+        if t not in _GENERIC_TITLES:
+            return t
+
+    # 从正文首行提取标题（不修改 soup）
+    body = soup.find("body")
+    if body:
+        first_tag = body.find(True, recursive=False)
+        if first_tag and first_tag.name not in ("meta", "link", "style", "script"):
+            # 取前 5 行，找到第一个匹配章标题模式的行
+            lines = first_tag.get_text(separator="\n", strip=True).split("\n")
+            for line in lines[:5]:
+                line = line.strip()
+                if 3 < len(line) < 100 and (
+                    re.search(r'\d+\.', line) or
+                    _CHAPTER_NUM_RE.match(line) or
+                    re.search(r'[第序前后附录楔引尾终]', line)
+                ):
+                    return line
+
+    return f"Chapter {chapter_num + 1}"
+
 
 class EpubParser:
     def __init__(self, file_path: str):
@@ -94,36 +300,34 @@ class EpubParser:
                     if idref in ("cover", "coverpage", "nav", "toc"):
                         continue
 
-                    # 优先从h1/h2/h3获取标题
-                    title_tag = soup.find(["h1", "h2", "h3"])
-                    if title_tag:
-                        chapter_title = title_tag.get_text(strip=True)
-                    else:
-                        # 尝试从<title>标签获取
-                        html_title_tag = soup.find("title")
-                        if html_title_tag and html_title_tag.string:
-                            chapter_title = html_title_tag.string.strip()
-                        else:
-                            chapter_title = f"Chapter {chapter_num + 1}"
-
-                    # 提取正文文本，排除<head>中的<title>以避免重复
+                    chapter_title = _get_chapter_title(soup, chapter_num)
                     head_tag = soup.find("head")
                     if head_tag:
                         head_tag.decompose()
-
                     text = soup.get_text(separator="\n", strip=True)
+                    
+                    # 如果 spine 文件总数很少（<=3），且单个文件文本 >100KB，尝试文本级拆分
+                    if len(spine_ids) <= 3 and len(text) > 100000:
+                        sub_chapters = split_soup_into_chapters(soup, chapter_title)
+                        if len(sub_chapters) > 1:
+                            for sc in sub_chapters:
+                                chapter_num += 1
+                                chapters.append({
+                                    "chapter_number": chapter_num,
+                                    "title": sc["title"],
+                                    "text_content": sc["content"],
+                                    "word_count": len(sc["content"]),
+                                })
+                            continue
 
                     if text and len(text) > 10:
                         chapter_num += 1
-
-                        chapters.append(
-                            {
-                                "chapter_number": chapter_num,
-                                "title": chapter_title,
-                                "text_content": text,
-                                "word_count": len(text),
-                            }
-                        )
+                        chapters.append({
+                            "chapter_number": chapter_num,
+                            "title": chapter_title,
+                            "text_content": text,
+                            "word_count": len(text),
+                        })
             else:
                 # Fallback: iterate all document items
                 for name in epub_zip.namelist():
@@ -135,36 +339,39 @@ class EpubParser:
                     content = epub_zip.read(name).decode("utf-8", errors="ignore")
                     soup = BeautifulSoup(content, "html.parser")
 
-                    # 优先从h1/h2/h3获取标题
-                    title_tag = soup.find(["h1", "h2", "h3"])
-                    if title_tag:
-                        chapter_title = title_tag.get_text(strip=True)
-                    else:
-                        # 尝试从<title>标签获取
-                        html_title_tag = soup.find("title")
-                        if html_title_tag and html_title_tag.string:
-                            chapter_title = html_title_tag.string.strip()
-                        else:
-                            chapter_title = f"Chapter {chapter_num + 1}"
-
-                    # 提取正文文本，排除<head>中的<title>以避免重复
+                    chapter_title = _get_chapter_title(soup, chapter_num)
                     head_tag = soup.find("head")
                     if head_tag:
                         head_tag.decompose()
-
                     text = soup.get_text(separator="\n", strip=True)
+
+                    # 如果单个文件特别大（>100KB文本），尝试文本级拆分
+                    if len(text) > 100000:
+                        sub_chapters = split_soup_into_chapters(soup, chapter_title)
+                        if len(sub_chapters) > 1:
+                            for sc in sub_chapters:
+                                chapter_num += 1
+                                chapters.append({
+                                    "chapter_number": chapter_num,
+                                    "title": sc["title"],
+                                    "text_content": sc["content"],
+                                    "word_count": len(sc["content"]),
+                                })
+                            continue
 
                     if text and len(text) > 10:
                         chapter_num += 1
+                        chapters.append({
+                            "chapter_number": chapter_num,
+                            "title": chapter_title,
+                            "text_content": text,
+                            "word_count": len(text),
+                        })
 
-                        chapters.append(
-                            {
-                                "chapter_number": chapter_num,
-                                "title": chapter_title,
-                                "text_content": text,
-                                "word_count": len(text),
-                            }
-                        )
+        # 处理圆圈数字注解，内联为 (注: xxx)
+        for ch in chapters:
+            ch["text_content"] = inline_annotations(ch["text_content"])
+            ch["word_count"] = len(ch["text_content"])
 
         return {
             "title": title,

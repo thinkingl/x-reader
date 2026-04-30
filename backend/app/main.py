@@ -892,6 +892,9 @@ def get_config(db: Session = Depends(get_db)):
         "sample_rate": int(configs.get("sample_rate", "24000")),
         "concurrency": int(configs.get("concurrency", "1")),
         
+        # 超时配置
+        "tts_timeout": int(configs.get("tts_timeout", "120")),
+        
         # 本地模型分段配置
         "local_chunk_size": int(configs.get("local_chunk_size", "200")),
         "local_chunk_gap": float(configs.get("local_chunk_gap", "0.3")),
@@ -931,7 +934,7 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool
             task_queue.converter.chunk_size = int(update_data["local_chunk_size"])
 
     # 重新配置在线 TTS（如果相关配置变更）
-    tts_config_keys = ["tts_mode", "mimo_api_key", "mimo_base_url", "online_chunk_size"]
+    tts_config_keys = ["tts_mode", "mimo_api_key", "mimo_base_url", "online_chunk_size", "tts_timeout"]
     if any(key in update_data for key in tts_config_keys):
         task_queue.configure_online_tts()
 
@@ -1009,6 +1012,7 @@ async def test_tts(
                 instruct=instruct,
                 ref_audio_path=ref_audio_path,
                 audio_format=audio_format,
+                speed=speed,
             )
             
             # 保存音频文件

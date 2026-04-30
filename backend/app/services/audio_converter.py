@@ -33,20 +33,23 @@ class AudioConverter:
         self.tts_mode = "local"  # local | online | online_first
         self.mimo_client = None
         self.online_chunk_size = 800  # 在线 TTS 分段大小
+        self.tts_timeout = 120  # TTS 单次请求超时秒数
 
     def set_progress_callback(self, callback: Callable):
         self.progress_callback = callback
     
     def configure_online_tts(self, tts_mode: str, api_key: str = "", 
-                             online_chunk_size: int = 800, base_url: str = None):
+                              online_chunk_size: int = 800, base_url: str = None,
+                              tts_timeout: int = 120):
         """配置在线 TTS"""
         self.tts_mode = tts_mode
         self.online_chunk_size = online_chunk_size
+        self.tts_timeout = tts_timeout
         
         if api_key:
             from app.services.mimo_tts import MiMoTTSClient
-            self.mimo_client = MiMoTTSClient(api_key=api_key, base_url=base_url)
-            logger.info(f"在线 TTS 已配置: mode={tts_mode}, chunk_size={online_chunk_size}")
+            self.mimo_client = MiMoTTSClient(api_key=api_key, base_url=base_url, timeout=tts_timeout)
+            logger.info(f"在线 TTS 已配置: mode={tts_mode}, chunk_size={online_chunk_size}, timeout={tts_timeout}s")
         else:
             self.mimo_client = None
             if tts_mode in ("online", "online_first"):
@@ -208,6 +211,7 @@ class AudioConverter:
                 ref_audio_path=ref_audio_path,
                 voice_id=voice_id,
                 audio_format="wav",
+                speed=speed,
                 start_time=start_time,
                 metadata=metadata,
             )
@@ -301,6 +305,7 @@ class AudioConverter:
                         instruct=instruct,
                         ref_audio_path=ref_audio_path,
                         audio_format="wav",
+                        speed=speed,
                     )
                     import io
                     audio_buffer = io.BytesIO(audio_bytes)
@@ -398,6 +403,7 @@ class AudioConverter:
         ref_audio_path: Optional[str] = None,
         voice_id: Optional[str] = None,
         audio_format: str = "wav",
+        speed: float = 1.0,
         start_time: float = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -429,6 +435,7 @@ class AudioConverter:
                 instruct=instruct,
                 ref_audio_path=ref_audio_path,
                 audio_format="wav",
+                speed=speed,
             )
             
             # 解码 WAV 音频

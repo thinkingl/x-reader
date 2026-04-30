@@ -165,6 +165,9 @@ class ConfigUpdate(BaseModel):
     mimo_model: Optional[str] = None
     mimo_default_voice: Optional[str] = None
     
+    # 超时配置
+    tts_timeout: Optional[int] = None  # TTS 单次请求超时秒数
+    
     # 音频输出配置
     audio_format: Optional[str] = None
     sample_rate: Optional[int] = None
@@ -198,6 +201,9 @@ class ConfigResponse(BaseModel):
     mimo_base_url: str = "https://token-plan-cn.xiaomimimo.com/v1"
     mimo_model: str = "mimo-v2.5-tts"
     mimo_default_voice: str = "冰糖"
+    
+    # 超时配置
+    tts_timeout: int = 120  # TTS 单次请求超时秒数
     
     # 音频输出配置
     audio_format: str = "wav"

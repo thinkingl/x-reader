@@ -36,12 +36,14 @@ class TaskQueue:
             mimo_api_key = configs.get("mimo_api_key", "")
             mimo_base_url = configs.get("mimo_base_url", "https://token-plan-cn.xiaomimimo.com/v1")
             online_chunk_size = int(configs.get("online_chunk_size", "800"))
+            tts_timeout = int(configs.get("tts_timeout", "120"))
             
             self.converter.configure_online_tts(
                 tts_mode=tts_mode,
                 api_key=mimo_api_key,
                 online_chunk_size=online_chunk_size,
                 base_url=mimo_base_url,
+                tts_timeout=tts_timeout,
             )
         finally:
             db.close()
