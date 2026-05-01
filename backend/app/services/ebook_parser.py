@@ -614,6 +614,11 @@ class MobiParser:
                     "word_count": len(full_text),
                 })
 
+        # 处理圆圈数字注解内联 + TTS 符号清理
+        for ch in chapters:
+            ch["text_content"] = sanitize_text(inline_annotations(ch["text_content"]))
+            ch["word_count"] = len(ch["text_content"])
+
         return {
             "title": title,
             "author": author,
