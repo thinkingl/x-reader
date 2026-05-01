@@ -139,6 +139,7 @@ class TaskQueue:
 
             # 文件名格式: {序号}_{标题}.{格式}，序号补零保证排序正确
             safe_title = "".join(c for c in chapter.title if c.isalnum() or c in " _-").strip()[:30] if chapter.title else ""
+            safe_title = safe_title.replace("/", "").replace("\\", "")
             filename = f"{chapter.chapter_number:03d}_{safe_title}.{audio_format}"
             output_path = os.path.join(audio_dir, str(book.id), filename)
             chapter_count = db.query(Chapter).filter(Chapter.book_id == book.id).count()

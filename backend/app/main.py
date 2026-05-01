@@ -266,7 +266,7 @@ async def upload_book(
         db.add(chapter)
 
         # 写入文本文件，文件名格式与音频一致
-        safe_title = re.sub(r'[《》（）\(\)、，,\s]', '', ch_data["title"] or f"Chapter{ch_data['chapter_number']}")
+        safe_title = re.sub(r'[\\/:*?"<>|《》（）\(\)、，,\s]', '', ch_data["title"] or f"Chapter{ch_data['chapter_number']}")
         safe_title = safe_title[:50]
         text_filename = f"{ch_data['chapter_number']:03d}_{safe_title}.txt"
         text_path = os.path.join(text_dir, text_filename)
