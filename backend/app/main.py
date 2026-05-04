@@ -521,12 +521,14 @@ def retry_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depend
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(404, "Task not found")
-    if task.status not in [TaskStatus.FAILED, TaskStatus.SKIPPED]:
-        raise HTTPException(400, "Can only retry failed or skipped tasks")
+    if task.status not in [TaskStatus.FAILED, TaskStatus.SKIPPED, TaskStatus.COMPLETED]:
+        raise HTTPException(400, "Can only retry failed, skipped, or completed tasks")
 
     chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
     if chapter:
         chapter.status = "pending"
+        chapter.audio_path = None
+        chapter.audio_duration = None
 
     task.status = TaskStatus.PENDING
     task.error_message = None
