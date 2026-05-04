@@ -560,9 +560,9 @@ class MobiParser:
         if author_tag:
             author = author_tag.get("content")
 
-        # 章节标题模式
+        # 章节标题模式：包括 "第X章"、"序"、"-1-" 等数字标记
         chapter_pattern = re.compile(
-            r'^(第.{1,10}[章节篇卷]|序|前言|后记|附录|目录|楔子|引子|尾声)'
+            r'^(第.{1,10}[章节篇卷]|序|前言|后记|附录|目录|楔子|引子|尾声|-\d{1,3}-)$'
         )
 
         # 按章节分割
