@@ -240,7 +240,7 @@ class ConfigResponse(BaseModel):
     local_chunk_gap: float = 0.3
     
     # 在线 API 分段配置
-    online_chunk_size: int = 800
+    online_chunk_size: int = 2000
     online_chunk_gap: float = 0.3
     
     # 目录配置

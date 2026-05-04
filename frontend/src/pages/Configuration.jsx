@@ -6,24 +6,24 @@ import { useAuth } from '../AuthContext';
 
 const { Title, Text, Paragraph } = Typography;
 
-// MiMo 内置语音列表
+// MiMo 内置语音列表 (来自 MiMo V2.5 TTS Skill)
 const MIMO_VOICES = [
-  { id: 'mimo_default', name: 'MiMo-默认', lang: '自动', gender: '-' },
-  { id: '冰糖', name: '冰糖', lang: '中文', gender: '女' },
-  { id: '茉莉', name: '茉莉', lang: '中文', gender: '女' },
-  { id: '苏打', name: '苏打', lang: '中文', gender: '男' },
-  { id: '白桦', name: '白桦', lang: '中文', gender: '男' },
-  { id: 'Mia', name: 'Mia', lang: '英文', gender: '女' },
-  { id: 'Chloe', name: 'Chloe', lang: '英文', gender: '女' },
-  { id: 'Milo', name: 'Milo', lang: '英文', gender: '男' },
-  { id: 'Dean', name: 'Dean', lang: '英文', gender: '男' },
+  { id: 'mimo_default', name: 'MiMo-默认', lang: '自动', gender: '-', style: '自动选择' },
+  { id: '冰糖', name: '冰糖', lang: '中文', gender: '女', style: '活泼少女' },
+  { id: '茉莉', name: '茉莉', lang: '中文', gender: '女', style: '知性女声' },
+  { id: '苏打', name: '苏打', lang: '中文', gender: '男', style: '阳光少年' },
+  { id: '白桦', name: '白桦', lang: '中文', gender: '男', style: '成熟男声' },
+  { id: 'Mia', name: 'Mia', lang: '英文', gender: '女', style: 'Lively girl' },
+  { id: 'Chloe', name: 'Chloe', lang: '英文', gender: '女', style: 'Sweet Dreamy' },
+  { id: 'Milo', name: 'Milo', lang: '英文', gender: '男', style: 'Sunny boy' },
+  { id: 'Dean', name: 'Dean', lang: '英文', gender: '男', style: 'Steady Gentle' },
 ];
 
 // MiMo 模型列表
 const MIMO_MODELS = [
-  { id: 'mimo-v2.5-tts', name: 'MiMo-V2.5-TTS', desc: '内置高质量语音' },
-  { id: 'mimo-v2.5-tts-voicedesign', name: 'MiMo-V2.5-TTS-VoiceDesign', desc: '文本描述自定义语音' },
-  { id: 'mimo-v2.5-tts-voiceclone', name: 'MiMo-V2.5-TTS-VoiceClone', desc: '音频样本克隆语音' },
+  { id: 'mimo-v2.5-tts', name: 'MiMo-V2.5-TTS', desc: '预置高品质音色，支持音频标签、风格控制、唱歌' },
+  { id: 'mimo-v2.5-tts-voicedesign', name: 'MiMo-V2.5-TTS-VoiceDesign', desc: '文本描述定制音色（性别/年龄/质感/情绪）' },
+  { id: 'mimo-v2.5-tts-voiceclone', name: 'MiMo-V2.5-TTS-VoiceClone', desc: '音频样本复刻任意音色' },
 ];
 
 function Configuration() {
@@ -248,7 +248,7 @@ function Configuration() {
             showSearch
             optionFilterProp="label"
             options={MIMO_VOICES.map(v => ({ 
-              label: `${v.name} (${v.lang}/${v.gender})`, 
+              label: `${v.name} - ${v.style} (${v.lang}/${v.gender})`, 
               value: v.id 
             }))} 
           />
@@ -341,15 +341,9 @@ function Configuration() {
         <Form.Item 
           label="在线文本分段大小（字符）" 
           name="online_chunk_size"
-          extra={
-            <span>
-              每段文本的最大字符数，较大的值可减少 API 调用次数
-              <br />
-              <Text type="warning">注意：单次请求文本不宜超过 2000 字符</Text>
-            </span>
-          }
+          extra="每段最大字符数。V2.5 单次支持 2500 字，建议 1500-2000 字以保稳定"
         >
-          <InputNumber min={200} max={2000} step={50} style={{ width: '100%' }} />
+          <InputNumber min={200} max={2500} step={100} style={{ width: '100%' }} />
         </Form.Item>
 
         <Form.Item 
