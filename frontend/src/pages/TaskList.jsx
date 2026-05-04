@@ -260,14 +260,13 @@ function TaskList() {
           options={books.map(b => ({ label: b.title, value: b.id }))}
         />
         <Button onClick={fetchTasks}>刷新</Button>
-        {tasks.filter(t => t.status === 'failed').length > 0 && (
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={handleRetryAllFailed}
-          >
-            重试本页失败 ({tasks.filter(t => t.status === 'failed').length})
-          </Button>
-        )}
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={handleRetryAllFailed}
+          disabled={tasks.filter(t => t.status === 'failed').length === 0}
+        >
+          重试本页失败 ({tasks.filter(t => t.status === 'failed').length})
+        </Button>
       </div>
 
       <Table
