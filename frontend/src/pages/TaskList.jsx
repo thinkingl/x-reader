@@ -86,6 +86,20 @@ function TaskList() {
     }
   };
 
+  const handleRetryAllFailed = async () => {
+    const failedTasks = tasks.filter(t => t.status === 'failed');
+    if (failedTasks.length === 0) return;
+    let success = 0;
+    for (const task of failedTasks) {
+      try {
+        await api.post(`/api/tasks/${task.id}/retry`);
+        success++;
+      } catch (e) {}
+    }
+    message.success(`已重试 ${success}/${failedTasks.length} 个任务`);
+    fetchTasks();
+  };
+
   const handleCancel = async (taskId) => {
     try {
       await api.delete(`/api/tasks/${taskId}`);
@@ -246,6 +260,14 @@ function TaskList() {
           options={books.map(b => ({ label: b.title, value: b.id }))}
         />
         <Button onClick={fetchTasks}>刷新</Button>
+        {tasks.filter(t => t.status === 'failed').length > 0 && (
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={handleRetryAllFailed}
+          >
+            重试本页失败 ({tasks.filter(t => t.status === 'failed').length})
+          </Button>
+        )}
       </div>
 
       <Table
