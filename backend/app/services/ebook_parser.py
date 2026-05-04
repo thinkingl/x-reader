@@ -523,9 +523,15 @@ class MobiParser:
     def parse(self) -> Dict[str, Any]:
         import mobi
         import shutil
+        import os
 
         tempdir, filepath = mobi.extract(self.file_path)
         try:
+            # 优先使用 mobi7 HTML 解析（章节分割更精确）
+            html_path = os.path.join(tempdir, "mobi7", "book.html")
+            if os.path.exists(html_path):
+                return self._parse_html(html_path)
+
             ext = Path(filepath).suffix.lower()
             if ext == ".epub":
                 return EpubParser(filepath).parse()
@@ -570,13 +576,16 @@ class MobiParser:
         current_chapter = None
         current_text = []
 
-        for p in soup.find_all("p"):
-            text = p.get_text(strip=True)
+        for elem in soup.find_all(["h1", "h2", "h3", "p"]):
+            text = elem.get_text(strip=True)
             if not text:
                 continue
 
-            # 检查是否是章节标题
-            if chapter_pattern.match(text):
+            # 检查是否是章节标题（h1-h3 或匹配模式的 p）
+            is_heading = elem.name in ("h1", "h2", "h3")
+            is_chapter_title = chapter_pattern.match(text)
+
+            if is_heading or is_chapter_title:
                 # 保存之前的章节
                 if current_text:
                     content = "\n".join(current_text).strip()
