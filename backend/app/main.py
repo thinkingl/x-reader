@@ -1031,8 +1031,16 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool
 @app.post("/api/config/test")
 async def test_tts(
     text: str = Form(...),
-    engine: str = Form("local"),  # local | online
+    engine: str = Form("local_omnivoice"),
     voice_preset_id: Optional[int] = Form(None),
+    voice_mode: Optional[str] = Form(None),
+    instruct: Optional[str] = Form(None),
+    ref_audio_path: Optional[str] = Form(None),
+    ref_text: Optional[str] = Form(None),
+    voice_id: Optional[str] = Form(None),
+    num_step: Optional[int] = Form(None),
+    guidance_scale: Optional[float] = Form(None),
+    speed: Optional[float] = Form(None),
     db: Session = Depends(get_db),
     _auth: bool = Depends(require_auth),
 ):
@@ -1077,20 +1085,27 @@ async def test_tts(
                     base_url=configs.get("mimo_base_url"),
                 )
     else:
-        # 无预设时根据测试引擎选择默认参数
+        # 自定义参数
         preset_params = {
-            "engine": "local_omnivoice",
-            "voice_mode": "auto",
+            "engine": engine or "local_omnivoice",
+            "voice_mode": voice_mode or "auto",
         }
-        if engine == "online" and configs.get("mimo_api_key"):
-            preset_params["engine"] = "online_mimo"
-            preset_params["voice_id"] = configs.get("mimo_default_voice", "冰糖")
-            from app.services.mimo_tts import MiMoTTSClient
-            if not task_queue.converter.mimo_client:
-                task_queue.converter.mimo_client = MiMoTTSClient(
-                    api_key=configs["mimo_api_key"],
-                    base_url=configs.get("mimo_base_url"),
-                )
+        if instruct:
+            preset_params["instruct"] = instruct
+        if ref_audio_path:
+            preset_params["ref_audio_path"] = ref_audio_path
+        if ref_text:
+            preset_params["ref_text"] = ref_text
+        if voice_id:
+            preset_params["voice_id"] = voice_id
+        if num_step is not None:
+            preset_params["num_step"] = num_step
+        if guidance_scale is not None:
+            preset_params["guidance_scale"] = guidance_scale
+        if speed is not None:
+            preset_params["speed"] = speed
+
+    # 在线模式下确保有 mimo_client
 
     # 生成临时文件路径
     test_id = str(uuid.uuid4())[:8]

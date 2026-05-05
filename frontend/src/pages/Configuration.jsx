@@ -33,13 +33,25 @@ function Configuration() {
   const { isAuthEnabled, enableAuth, disableAuth, logout } = useAuth();
 
   // 测试相关状态
-  const [testText, setTestText] = useState('你好，这是一段测试文本。用于验证语音合成的效果。');
-  const [testPreset, setTestPreset] = useState(null);
-  const [testEngine, setTestEngine] = useState('local'); // local | online
+  const [testText, setTestText] = useState('你好，这是一段测试文本。');
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef(null);
+
+  // 测试模式：preset（使用预设）或 custom（自定义参数）
+  const [testMode, setTestMode] = useState('preset');
+  const [testPreset, setTestPreset] = useState(null);
+  // 自定义参数
+  const [testEngine, setTestEngine] = useState('local_omnivoice');
+  const [testVoiceMode, setTestVoiceMode] = useState('clone');
+  const [testVoiceId, setTestVoiceId] = useState('冰糖');
+  const [testInstruct, setTestInstruct] = useState('');
+  const [testRefAudio, setTestRefAudio] = useState('');
+  const [testRefText, setTestRefText] = useState('');
+  const [testNumStep, setTestNumStep] = useState(32);
+  const [testGuidanceScale, setTestGuidanceScale] = useState(2.0);
+  const [testSpeed, setTestSpeed] = useState(1.0);
 
   // 认证相关状态
   const [authKey, setAuthKey] = useState('');
@@ -126,13 +138,28 @@ function Configuration() {
     try {
       const formData = new FormData();
       formData.append('text', testText);
-      formData.append('engine', testEngine);
-      if (testPreset) {
+
+      if (testMode === 'preset' && testPreset) {
         formData.append('voice_preset_id', testPreset);
+      } else {
+        // 自定义参数
+        formData.append('engine', testEngine);
+        formData.append('voice_mode', testVoiceMode);
+        if (testInstruct) formData.append('instruct', testInstruct);
+        if (testRefAudio) formData.append('ref_audio_path', testRefAudio);
+        if (testRefText) formData.append('ref_text', testRefText);
+        if (testEngine === 'online_mimo') {
+          if (testVoiceMode === 'auto') formData.append('voice_id', testVoiceId);
+        }
+        if (testEngine === 'local_omnivoice') {
+          formData.append('num_step', testNumStep);
+          formData.append('guidance_scale', testGuidanceScale);
+          formData.append('speed', testSpeed);
+        }
       }
 
       const res = await api.post('/api/config/test', formData, {
-        timeout: 600000,  // 10 分钟超时，适应慢速 GPU
+        timeout: 600000,
       });
       setTestResult(res.data);
       message.success(res.data.message);
@@ -419,6 +446,70 @@ function Configuration() {
   // 渲染测试功能
   const renderTestSection = () => (
     <Card title={<><ExperimentOutlined /> 测试语音合成</>} style={{ marginBottom: 16 }}>
+      {/* 模式切换 */}
+      <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Select
+          value={testMode}
+          onChange={(v) => setTestMode(v)}
+          style={{ width: 160 }}
+          options={[
+            { label: '使用预设', value: 'preset' },
+            { label: '自定义参数', value: 'custom' },
+          ]}
+        />
+
+        {testMode === 'preset' ? (
+          <Select
+            placeholder="选择语音预设"
+            style={{ width: 250 }}
+            value={testPreset}
+            onChange={setTestPreset}
+            allowClear
+            options={presets.map(p => ({ label: `${p.name} (${p.engine === 'online_mimo' ? '在线' : '本地'}-${p.voice_mode})`, value: p.id }))}
+          />
+        ) : (
+          <>
+            <Select value={testEngine} onChange={setTestEngine} style={{ width: 150 }}
+              options={[
+                { label: '本地 OmniVoice', value: 'local_omnivoice' },
+                { label: '在线 MiMo', value: 'online_mimo' },
+              ]} />
+            <Select value={testVoiceMode} onChange={setTestVoiceMode} style={{ width: 100 }}
+              options={[
+                { label: 'clone', value: 'clone' },
+                { label: 'design', value: 'design' },
+                { label: 'auto', value: 'auto' },
+              ]} />
+            {testEngine === 'online_mimo' && testVoiceMode === 'auto' && (
+              <Select value={testVoiceId} onChange={setTestVoiceId} style={{ width: 160 }}
+                options={MIMO_VOICES.map(v => ({ label: v.name, value: v.id }))} />
+            )}
+            {testVoiceMode === 'design' && (
+              <Input placeholder="instruct" value={testInstruct} onChange={e => setTestInstruct(e.target.value)}
+                style={{ width: 250 }} />
+            )}
+          </>
+        )}
+      </div>
+
+      {/* 本地模型参数 */}
+      {testMode === 'custom' && testEngine === 'local_omnivoice' && (
+        <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Space>
+            <Text>步数</Text>
+            <InputNumber min={1} max={64} value={testNumStep} onChange={setTestNumStep} style={{ width: 80 }} />
+          </Space>
+          <Space>
+            <Text>引导</Text>
+            <InputNumber min={1} max={3} step={0.1} value={testGuidanceScale} onChange={setTestGuidanceScale} style={{ width: 80 }} />
+          </Space>
+          <Space>
+            <Text>语速</Text>
+            <InputNumber min={0.5} max={2} step={0.1} value={testSpeed} onChange={setTestSpeed} style={{ width: 80 }} />
+          </Space>
+        </div>
+      )}
+
       <div style={{ marginBottom: 16 }}>
         <Input.TextArea
           rows={3}
@@ -427,34 +518,15 @@ function Configuration() {
           placeholder="输入测试文本..."
         />
       </div>
-      
-      <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Select
-          value={testEngine}
-          onChange={setTestEngine}
-          style={{ width: 150 }}
-          options={[
-            { label: '本地模型', value: 'local' },
-            { label: '在线 API', value: 'online' },
-          ]}
-        />
-        <Select
-          placeholder="选择语音预设"
-          style={{ width: 250 }}
-          value={testPreset}
-          onChange={setTestPreset}
-          allowClear
-          options={presets.map(p => ({ label: p.name, value: p.id }))}
-        />
-        <Button
-          type="primary"
-          icon={<AudioOutlined />}
-          onClick={handleTest}
-          loading={testLoading}
-        >
-          生成测试音频
-        </Button>
-      </div>
+
+      <Button
+        type="primary"
+        icon={<AudioOutlined />}
+        onClick={handleTest}
+        loading={testLoading}
+      >
+        生成测试音频
+      </Button>
 
       {testLoading && (
         <Alert
