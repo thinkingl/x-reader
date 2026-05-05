@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Que
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List, Optional
 import os
 import re
@@ -95,8 +96,19 @@ def startup():
     # Read config from database
     db = next(get_db())
 
-    # 后端重启时，将中断的任务重新提交（而非标记失败）
-    # 1. RUNNING 任务重置为 QUEUED（submit_task 会处理状态）
+    # 兼容旧数据库：添加新列（SQLite ALTER TABLE）
+    try:
+        db.execute(text("ALTER TABLE voice_presets ADD COLUMN engine VARCHAR DEFAULT 'local_omnivoice'"))
+        db.commit()
+    except Exception:
+        pass  # 列已存在
+    try:
+        db.execute(text("ALTER TABLE voice_presets ADD COLUMN params TEXT"))
+        db.commit()
+    except Exception:
+        pass  # 列已存在
+
+    # Reset stuck tasks from previous session
     running_tasks = db.query(Task).filter(Task.status == TaskStatus.RUNNING).all()
     for task in running_tasks:
         task.status = TaskStatus.QUEUED
