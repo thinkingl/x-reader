@@ -69,16 +69,26 @@ def split_text_into_chapters(text: str) -> List[Dict[str, str]]:
 _CIRCLED_RE = re.compile(r'[①②③④⑤⑥⑦⑧⑨⑩]')
 
 # TTS 不友好的符号，替换为空格
-_TTS_NONSPEECH_RE = re.compile(r'[《》〈〉「」『』【】〖〗]')
+_TTS_NONSPEECH_RE = re.compile(r'[《》〈〉「」『』【】〖〗♦●◆◇★☆○●◎◇◆□■△▲▽▼※→←↑↓↔↕♠♣♥♦♪♫]')
 
-# 多余空白行
 _MULTI_BLANK_RE = re.compile(r'\n{3,}')
 
 
 def sanitize_text(text: str) -> str:
-    """清理 TTS 不适用的符号，规范化空白"""
+    """清理 TTS 不适用的符号，规范化空白，移除纯装饰行"""
     text = _TTS_NONSPEECH_RE.sub(' ', text)
     text = _MULTI_BLANK_RE.sub('\n\n', text)
+    # 移除纯装饰行：不含任何可读内容（中文、英文字母、数字）
+    lines = text.split('\n')
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # 至少包含一些可读内容
+        if re.search(r'[\u4e00-\u9fff]|[a-zA-Z]|\d', stripped):
+            cleaned.append(line)
+    text = '\n'.join(cleaned)
     text = text.strip()
     return text
 
@@ -568,49 +578,53 @@ class MobiParser:
 
         # 章节标题模式：包括 "第X章"、"序"、"-1-" 等数字标记
         chapter_pattern = re.compile(
-            r'^(第.{1,10}[章节篇卷]|序|前言|后记|附录|目录|楔子|引子|尾声|-\d{1,3}-)$'
+            r'(?x)^(第.{1,12}?[章节篇卷](?:\s+|$)|序|前言|后记|附录|目录|楔子|引子|尾声|-\d{1,3}-)'
         )
 
-        # 按章节分割
-        chapters = []
-        current_chapter = None
-        current_text = []
+        # 按章节分割 - 先尝试 p 标签，不足时回退到 h1-h3
+        for attempt_tags in (["p"], ["h1", "h2", "h3", "p"]):
+            chapters = []
+            current_chapter = None
+            current_text = []
 
-        for elem in soup.find_all(["h1", "h2", "h3", "p"]):
-            text = elem.get_text(strip=True)
-            if not text:
-                continue
+            for elem in soup.find_all(attempt_tags):
+                text = elem.get_text(strip=True)
+                if not text:
+                    continue
 
-            # 检查是否是章节标题（h1-h3 或匹配模式的 p）
-            is_heading = elem.name in ("h1", "h2", "h3")
-            is_chapter_title = chapter_pattern.match(text)
+                # 章节边界：h1-h3 标签 或 p 标签匹配章节模式
+                is_chapter_boundary = bool(chapter_pattern.match(text))
+                if not is_chapter_boundary and elem.name in ("h1", "h2", "h3"):
+                    is_chapter_boundary = True
 
-            if is_heading or is_chapter_title:
-                # 保存之前的章节
-                if current_text:
-                    content = "\n".join(current_text).strip()
-                    if content and len(content) > 10:
-                        chapters.append({
-                            "chapter_number": len(chapters) + 1,
-                            "title": current_chapter or f"Chapter {len(chapters) + 1}",
-                            "text_content": content,
-                            "word_count": len(content),
-                        })
-                    current_text = []
-                current_chapter = text
-            else:
-                current_text.append(text)
+                if is_chapter_boundary:
+                    if current_text:
+                        content = "\n".join(current_text).strip()
+                        if content and len(content) > 10:
+                            chapters.append({
+                                "chapter_number": len(chapters) + 1,
+                                "title": current_chapter or f"Chapter {len(chapters) + 1}",
+                                "text_content": content,
+                                "word_count": len(content),
+                            })
+                        current_text = []
+                    current_chapter = text
+                else:
+                    current_text.append(text)
 
-        # 添加最后一章
-        if current_text:
-            content = "\n".join(current_text).strip()
-            if content and len(content) > 10:
-                chapters.append({
-                    "chapter_number": len(chapters) + 1,
-                    "title": current_chapter or f"Chapter {len(chapters) + 1}",
-                    "text_content": content,
-                    "word_count": len(content),
-                })
+            # 保存最后一章
+            if current_text:
+                content = "\n".join(current_text).strip()
+                if content and len(content) > 10:
+                    chapters.append({
+                        "chapter_number": len(chapters) + 1,
+                        "title": current_chapter or f"Chapter {len(chapters) + 1}",
+                        "text_content": content,
+                        "word_count": len(content),
+                    })
+
+            if len(chapters) > 3:  # 找到了足够的章节，退出
+                break
 
         # 如果没有按标题分割成功，尝试按段落分割
         if not chapters:
