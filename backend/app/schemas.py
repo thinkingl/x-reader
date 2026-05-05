@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -132,14 +132,9 @@ class TaskList(BaseModel):
 class VoicePresetBase(BaseModel):
     name: str
     is_default: bool = False
-    voice_mode: str = "design"
-    instruct: Optional[str] = None
-    ref_audio_path: Optional[str] = None
-    ref_text: Optional[str] = None
-    num_step: int = 32
-    guidance_scale: float = 2.0
-    speed: float = 1.0
-    language: Optional[str] = None
+    engine: str = "local_omnivoice"  # local_omnivoice | online_mimo
+    voice_mode: str = "clone"        # clone | design | auto
+    params: Optional[Dict[str, Any]] = None  # JSON 参数（引擎专属）
 
 
 class VoicePresetCreate(VoicePresetBase):
@@ -149,14 +144,9 @@ class VoicePresetCreate(VoicePresetBase):
 class VoicePresetUpdate(BaseModel):
     name: Optional[str] = None
     is_default: Optional[bool] = None
+    engine: Optional[str] = None
     voice_mode: Optional[str] = None
-    instruct: Optional[str] = None
-    ref_audio_path: Optional[str] = None
-    ref_text: Optional[str] = None
-    num_step: Optional[int] = None
-    guidance_scale: Optional[float] = None
-    speed: Optional[float] = None
-    language: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
 
 
 class VoicePresetResponse(VoicePresetBase):
@@ -175,9 +165,6 @@ class VoicePresetList(BaseModel):
 
 # Config schemas
 class ConfigUpdate(BaseModel):
-    # TTS 模式
-    tts_mode: Optional[str] = None  # local | online | online_first
-    
     # 本地模型配置
     model_path: Optional[str] = None
     device: Optional[str] = None
@@ -212,9 +199,6 @@ class ConfigUpdate(BaseModel):
 
 
 class ConfigResponse(BaseModel):
-    # TTS 模式
-    tts_mode: str = "online_first"
-    
     # 本地模型配置
     model_path: str = "models/OmniVoice"
     device: str = "auto"

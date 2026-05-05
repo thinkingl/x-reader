@@ -144,6 +144,32 @@ def startup():
     # 配置在线 TTS
     task_queue.configure_online_tts()
 
+    # 迁移旧 VoicePreset 数据
+    import json
+    migrated = 0
+    presets = db.query(VoicePreset).filter(VoicePreset.engine == None).all()
+    for p in presets:
+        if p.engine is not None:
+            continue
+        p.engine = "local_omnivoice"
+        params = {}
+        if p.instruct:
+            params["instruct"] = p.instruct
+        if p.ref_audio_path:
+            params["ref_audio_path"] = p.ref_audio_path
+        if p.ref_text:
+            params["ref_text"] = p.ref_text
+        if p.language:
+            params["language"] = p.language
+        params["num_step"] = p.num_step or 32
+        params["guidance_scale"] = p.guidance_scale or 2.0
+        params["speed"] = p.speed or 1.0
+        p.params = json.dumps(params)
+        migrated += 1
+    if migrated:
+        db.commit()
+        logger.info(f"已迁移 {migrated} 个旧预设到新格式")
+
     # 从配置读取并发数并更新
     concurrency = int(configs.get("concurrency", "1"))
     if concurrency != task_queue.max_workers:
@@ -688,19 +714,24 @@ def stream_audio(book_id: int, chapter_id: int, db: Session = Depends(get_db), _
 
 @app.post("/api/voice-presets", response_model=VoicePresetResponse)
 def create_voice_preset(data: VoicePresetCreate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
+    import json
     if data.is_default:
         db.query(VoicePreset).filter(VoicePreset.is_default == True).update({"is_default": False})
-    preset = VoicePreset(**data.dict())
+    preset_dict = data.dict()
+    # params 是 dict，存入 DB 时需要转 JSON 字符串
+    if preset_dict.get("params"):
+        preset_dict["params"] = json.dumps(preset_dict["params"])
+    preset = VoicePreset(**preset_dict)
     db.add(preset)
     db.commit()
     db.refresh(preset)
-    return preset
+    return _preset_to_response(preset)
 
 
 @app.get("/api/voice-presets", response_model=VoicePresetList)
 def list_voice_presets(db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     presets = db.query(VoicePreset).order_by(VoicePreset.created_at.desc()).all()
-    return VoicePresetList(items=presets, total=len(presets))
+    return VoicePresetList(items=[_preset_to_response(p) for p in presets], total=len(presets))
 
 
 @app.get("/api/voice-presets/{preset_id}", response_model=VoicePresetResponse)
@@ -708,11 +739,12 @@ def get_voice_preset(preset_id: int, db: Session = Depends(get_db), _auth: bool 
     preset = db.query(VoicePreset).filter(VoicePreset.id == preset_id).first()
     if not preset:
         raise HTTPException(404, "Preset not found")
-    return preset
+    return _preset_to_response(preset)
 
 
 @app.put("/api/voice-presets/{preset_id}", response_model=VoicePresetResponse)
 def update_voice_preset(preset_id: int, data: VoicePresetUpdate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
+    import json
     preset = db.query(VoicePreset).filter(VoicePreset.id == preset_id).first()
     if not preset:
         raise HTTPException(404, "Preset not found")
@@ -721,11 +753,36 @@ def update_voice_preset(preset_id: int, data: VoicePresetUpdate, db: Session = D
     if update_data.get("is_default"):
         db.query(VoicePreset).filter(VoicePreset.is_default == True).update({"is_default": False})
 
+    # params 需要转 JSON 字符串
+    if "params" in update_data and update_data["params"]:
+        update_data["params"] = json.dumps(update_data["params"])
+
     for key, value in update_data.items():
         setattr(preset, key, value)
     db.commit()
     db.refresh(preset)
-    return preset
+    return _preset_to_response(preset)
+
+
+def _preset_to_response(preset):
+    """将 DB 的 VoicePreset 转为响应，处理 params JSON"""
+    import json
+    data = {
+        "id": preset.id,
+        "name": preset.name,
+        "is_default": preset.is_default,
+        "engine": preset.engine or "local_omnivoice",
+        "voice_mode": preset.voice_mode or "clone",
+        "params": None,
+        "created_at": preset.created_at,
+        "updated_at": preset.updated_at,
+    }
+    if preset.params:
+        try:
+            data["params"] = json.loads(preset.params)
+        except:
+            data["params"] = {}
+    return VoicePresetResponse(**data)
 
 
 @app.delete("/api/voice-presets/{preset_id}")
@@ -893,9 +950,6 @@ def get_reference_audio(filename: str, _auth: bool = Depends(require_auth)):
 def get_config(db: Session = Depends(get_db)):
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}
     return ConfigResponse(**{
-        # TTS 模式
-        "tts_mode": configs.get("tts_mode", "online_first"),
-        
         # 本地模型配置
         "model_path": configs.get("model_path", LOCAL_MODEL_PATH),
         "device": configs.get("device", "auto"),
@@ -954,8 +1008,8 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool
         if task_queue.converter:
             task_queue.converter.chunk_size = int(update_data["local_chunk_size"])
 
-    # 重新配置在线 TTS（如果相关配置变更）
-    tts_config_keys = ["tts_mode", "mimo_api_key", "mimo_base_url", "online_chunk_size", "tts_timeout"]
+    # 重新配置在线 TTS
+    tts_config_keys = ["mimo_api_key", "mimo_base_url", "online_chunk_size"]
     if any(key in update_data for key in tts_config_keys):
         task_queue.configure_online_tts()
 
@@ -978,108 +1032,80 @@ async def test_tts(
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}
     audio_format = configs.get("audio_format", "wav")
     
-    # 根据引擎选择分段大小
-    if engine == "online":
-        chunk_size = int(configs.get("online_chunk_size", "800"))
-    else:
-        chunk_size = int(configs.get("local_chunk_size", "200"))
-
-    # 获取语音预设
-    voice_mode = "auto"
-    instruct = None
-    ref_audio_path = None
-    ref_text = None
-    language = None
-    num_step = 32
-    guidance_scale = 2.0
-    speed = 1.0
-
+    # 获取语音预设参数
+    import json
+    preset_params = None
     if voice_preset_id:
         preset = db.query(VoicePreset).filter(VoicePreset.id == voice_preset_id).first()
         if preset:
-            voice_mode = preset.voice_mode
-            instruct = preset.instruct
-            ref_audio_path = preset.ref_audio_path
-            ref_text = preset.ref_text
-            language = preset.language
-            num_step = preset.num_step
-            guidance_scale = preset.guidance_scale
-            speed = preset.speed
+            preset_params = {
+                "engine": preset.engine or "local_omnivoice",
+                "voice_mode": preset.voice_mode or "auto",
+            }
+            if preset.params:
+                try: preset_params.update(json.loads(preset.params))
+                except: pass
+            # 兼容旧字段
+            if preset.instruct: preset_params.setdefault("instruct", preset.instruct)
+            if preset.ref_audio_path: preset_params.setdefault("ref_audio_path", preset.ref_audio_path)
+            if preset.ref_text: preset_params.setdefault("ref_text", preset.ref_text)
+            preset_params.setdefault("num_step", preset.num_step or 32)
+            preset_params.setdefault("guidance_scale", preset.guidance_scale or 2.0)
+            preset_params.setdefault("speed", preset.speed or 1.0)
+            if preset.language: preset_params.setdefault("language", preset.language)
+
+        # 在线模式下确保有 mimo_client
+        if preset_params and preset_params.get("engine") == "online_mimo":
+            if not preset_params.get("voice_id"):
+                preset_params["voice_id"] = configs.get("mimo_default_voice", "冰糖")
+            if configs.get("mimo_api_key") and not task_queue.converter.mimo_client:
+                from app.services.mimo_tts import MiMoTTSClient
+                task_queue.converter.mimo_client = MiMoTTSClient(
+                    api_key=configs["mimo_api_key"],
+                    base_url=configs.get("mimo_base_url"),
+                )
+    else:
+        # 无预设时根据测试引擎选择默认参数
+        preset_params = {
+            "engine": "local_omnivoice",
+            "voice_mode": "auto",
+        }
+        if engine == "online" and configs.get("mimo_api_key"):
+            preset_params["engine"] = "online_mimo"
+            preset_params["voice_id"] = configs.get("mimo_default_voice", "冰糖")
+            from app.services.mimo_tts import MiMoTTSClient
+            if not task_queue.converter.mimo_client:
+                task_queue.converter.mimo_client = MiMoTTSClient(
+                    api_key=configs["mimo_api_key"],
+                    base_url=configs.get("mimo_base_url"),
+                )
 
     # 生成临时文件路径
     test_id = str(uuid.uuid4())[:8]
     output_path = f"data/audio/test_{test_id}.{audio_format}"
 
     try:
-        # 在线 API 测试
-        if engine == "online":
-            mimo_api_key = configs.get("mimo_api_key", "")
-            if not mimo_api_key:
-                raise HTTPException(400, "未配置 MiMo API Key")
-            
-            mimo_base_url = configs.get("mimo_base_url", "https://token-plan-cn.xiaomimimo.com/v1")
-            
-            from app.services.mimo_tts import MiMoTTSClient
-            mimo_client = MiMoTTSClient(api_key=mimo_api_key, base_url=mimo_base_url)
-            
-            # 获取默认语音
-            mimo_default_voice = configs.get("mimo_default_voice", "冰糖")
-            
-            # 调用 MiMo API
-            audio_bytes = mimo_client.synthesize(
-                text=text,
-                voice_mode=voice_mode,
-                voice_id=mimo_default_voice,
-                instruct=instruct,
-                ref_audio_path=ref_audio_path,
-                audio_format=audio_format,
-                speed=speed,
-            )
-            
-            # 保存音频文件
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            with open(output_path, "wb") as f:
-                f.write(audio_bytes)
-            
-            # 计算时长 (WAV 24kHz 16bit mono)
-            if audio_format == "wav":
-                duration = (len(audio_bytes) - 44) / (24000 * 2)  # 44 bytes header, 2 bytes per sample
-            else:
-                duration = 0  # 其他格式难以精确计算
-            
-            return {
-                "success": True,
-                "audio_url": f"/api/config/test-audio/test_{test_id}.{audio_format}",
-                "duration": duration,
-                "engine": "online",
-                "message": f"[在线] 生成成功，时长 {duration:.1f} 秒",
-            }
-        
-        # 本地模型测试
         if not task_queue.converter:
             raise HTTPException(500, "TTS 模型未加载")
 
+        if engine == "online":
+            chunk_size = int(configs.get("online_chunk_size", "2000"))
+        else:
+            chunk_size = int(configs.get("local_chunk_size", "200"))
         task_queue.converter.chunk_size = chunk_size
 
         result = task_queue.converter.convert_chapter(
             text=text,
             output_path=output_path,
-            voice_mode=voice_mode,
-            instruct=instruct,
-            ref_audio_path=ref_audio_path,
-            ref_text=ref_text,
-            language=language,
-            num_step=num_step,
-            guidance_scale=guidance_scale,
-            speed=speed,
+            preset=preset_params,
         )
 
         return {
             "success": True,
             "audio_url": f"/api/config/test-audio/test_{test_id}.{audio_format}",
             "duration": result["duration"],
-            "engine": "local",
-            "message": f"[本地] 生成成功，时长 {result['duration']:.1f} 秒",
+            "engine": result.get("engine", engine),
+            "message": f"生成成功，时长 {result['duration']:.1f} 秒",
         }
     except Exception as e:
         return {

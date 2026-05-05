@@ -86,7 +86,6 @@ class TaskQueue:
     def _execute_task(self, task_id: int):
         db = SessionLocal()
         try:
-            # 任务真正开始执行，更新状态和 start_time
             task = db.query(Task).filter(Task.id == task_id).first()
             if not task:
                 return
@@ -106,44 +105,70 @@ class TaskQueue:
                 db.commit()
                 return
 
-            # 删除旧的音频文件（如果存在）
+            # 删除旧的音频文件
             if chapter.audio_path and os.path.exists(chapter.audio_path):
                 try:
                     os.remove(chapter.audio_path)
-                    logger.info(f"已删除旧音频文件: {chapter.audio_path}")
                 except Exception as e:
                     logger.warning(f"删除旧音频文件失败: {e}")
 
-            # 更新章节状态为 converting
             chapter.status = "converting"
             db.commit()
 
             book = db.query(Book).filter(Book.id == task.book_id).first()
+            configs = {c.key: c.value for c in db.query(SystemConfig).all()}
+            audio_dir = configs.get("audio_dir", "data/audio")
+            audio_format = configs.get("audio_format", "wav")
+
+            # 解析预设参数
+            import json
+            preset_params = None
             voice_preset = None
             if task.voice_preset_id:
                 voice_preset = db.query(VoicePreset).filter(VoicePreset.id == task.voice_preset_id).first()
 
-            voice_mode = voice_preset.voice_mode if voice_preset else "auto"
-            instruct = voice_preset.instruct if voice_preset else None
-            ref_audio_path = voice_preset.ref_audio_path if voice_preset else None
-            ref_text = voice_preset.ref_text if voice_preset else None
-            language = voice_preset.language if voice_preset else None
-            num_step = voice_preset.num_step if voice_preset else 32
-            guidance_scale = voice_preset.guidance_scale if voice_preset else 2.0
-            speed = voice_preset.speed if voice_preset else 1.0
+            if voice_preset:
+                preset_params = {
+                    "engine": voice_preset.engine or "local_omnivoice",
+                    "voice_mode": voice_preset.voice_mode or "auto",
+                }
+                if voice_preset.params:
+                    try:
+                        preset_params.update(json.loads(voice_preset.params))
+                    except:
+                        pass
+                # 兼容旧字段
+                if voice_preset.instruct:
+                    preset_params.setdefault("instruct", voice_preset.instruct)
+                if voice_preset.ref_audio_path:
+                    preset_params.setdefault("ref_audio_path", voice_preset.ref_audio_path)
+                if voice_preset.ref_text:
+                    preset_params.setdefault("ref_text", voice_preset.ref_text)
+                preset_params.setdefault("num_step", voice_preset.num_step or 32)
+                preset_params.setdefault("guidance_scale", voice_preset.guidance_scale or 2.0)
+                preset_params.setdefault("speed", voice_preset.speed or 1.0)
+                if voice_preset.language:
+                    preset_params.setdefault("language", voice_preset.language)
 
-            configs = {c.key: c.value for c in db.query(SystemConfig).all()}
-            audio_dir = configs.get("audio_dir", "data/audio")
-            audio_format = configs.get("audio_format", "wav")
-            chunk_size = int(configs.get("local_chunk_size", "200"))
+            # 根据引擎选择分段大小
+            if preset_params and preset_params.get("engine") == "online_mimo":
+                chunk_size = int(configs.get("online_chunk_size", "2000"))
+                if configs.get("mimo_api_key") and not self.converter.mimo_client:
+                    from app.services.mimo_tts import MiMoTTSClient
+                    self.converter.mimo_client = MiMoTTSClient(
+                        api_key=configs["mimo_api_key"],
+                        base_url=configs.get("mimo_base_url"),
+                    )
+            else:
+                chunk_size = int(configs.get("local_chunk_size", "200"))
 
-            # 文件名格式: {序号}_{标题}.{格式}，序号补零保证排序正确
+            # 生成文件路径
             safe_title = "".join(c for c in chapter.title if c.isalnum() or c in " _-").strip()[:30] if chapter.title else ""
             safe_title = safe_title.replace("/", "").replace("\\", "")
             filename = f"{chapter.chapter_number:03d}_{safe_title}.{audio_format}"
             output_path = os.path.join(audio_dir, str(book.id), filename)
-            chapter_count = db.query(Chapter).filter(Chapter.book_id == book.id).count()
 
+            chapter_count = db.query(Chapter).filter(Chapter.book_id == book.id).count()
             metadata = {
                 "title": chapter.title,
                 "artist": book.author,
@@ -153,25 +178,16 @@ class TaskQueue:
                 "total_tracks": chapter_count,
             }
 
-            self._update_progress(task_id, f"正在转换: {chapter.title[:20]}...", 0)
-
-            # Set progress callback - pass directly for thread safety
             def progress_cb(msg, progress=None):
                 self._update_progress(task_id, msg, progress)
 
+            self._update_progress(task_id, f"正在转换: {chapter.title[:20]}...", 0)
             self.converter.chunk_size = chunk_size
 
             result = self.converter.convert_chapter(
                 text=chapter.text_content,
                 output_path=output_path,
-                voice_mode=voice_mode,
-                instruct=instruct,
-                ref_audio_path=ref_audio_path,
-                ref_text=ref_text,
-                language=language,
-                num_step=num_step,
-                guidance_scale=guidance_scale,
-                speed=speed,
+                preset=preset_params,
                 metadata=metadata,
                 progress_callback=progress_cb,
             )

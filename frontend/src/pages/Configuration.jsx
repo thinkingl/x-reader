@@ -163,25 +163,6 @@ function Configuration() {
   const renderEngineConfig = () => (
     <Card title={<><SettingOutlined /> TTS 引擎配置</>} style={{ marginBottom: 16 }}>
       <Form layout="vertical" initialValues={config} onFinish={handleConfigSave}>
-        {/* TTS 模式选择 */}
-        <Form.Item 
-          label={
-            <Space>
-              <span>TTS 模式</span>
-              <Tooltip title="选择在线优先时，优先使用 MiMo API，失败后自动回退到本地模型">
-                <QuestionCircleOutlined />
-              </Tooltip>
-            </Space>
-          } 
-          name="tts_mode"
-        >
-          <Select options={[
-            { label: '仅本地模型', value: 'local' },
-            { label: '仅在线 API', value: 'online' },
-            { label: '在线优先（失败回退本地）', value: 'online_first' },
-          ]} />
-        </Form.Item>
-
         <Divider orientation="left">本地模型配置</Divider>
         
         <Form.Item label="模型路径" name="model_path">

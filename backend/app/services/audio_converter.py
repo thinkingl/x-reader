@@ -178,221 +178,156 @@ class AudioConverter:
         self,
         text: str,
         output_path: str,
-        voice_mode: str = "auto",
-        instruct: Optional[str] = None,
-        ref_audio_path: Optional[str] = None,
-        ref_text: Optional[str] = None,
-        language: Optional[str] = None,
-        num_step: int = 32,
-        guidance_scale: float = 2.0,
-        speed: float = 1.0,
+        preset: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        voice_id: Optional[str] = None,
         progress_callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
-        """
-        转换章节文本为音频
-        
-        Args:
-            voice_id: 在线 TTS 的语音 ID (如 "冰糖", "Mia")
-            progress_callback: 本次转换专用的进度回调（并发安全）
-        """
-        # 优先使用传入的回调，否则用全局的
+        """转换章节文本为音频，根据预设的 engine 路由"""
         cb = progress_callback or self.progress_callback
         self._local.progress_callback = cb
         start_time = time.time()
-        
-        if self.tts_mode == "online":
-            return self._convert_online(
+
+        params = preset or {}
+        engine = params.get("engine", "local_omnivoice")
+
+        if engine == "online_mimo":
+            return self._convert_mimo(
                 text=text,
                 output_path=output_path,
-                voice_mode=voice_mode,
-                instruct=instruct,
-                ref_audio_path=ref_audio_path,
-                voice_id=voice_id,
-                audio_format="wav",
-                speed=speed,
-                start_time=start_time,
-                metadata=metadata,
-            )
-        elif self.tts_mode == "online_first" and self.mimo_client:
-            # 在线优先模式：每段分别尝试在线，失败用本地
-            return self._convert_online_first(
-                text=text,
-                output_path=output_path,
-                voice_mode=voice_mode,
-                instruct=instruct,
-                ref_audio_path=ref_audio_path,
-                ref_text=ref_text,
-                language=language,
-                num_step=num_step,
-                guidance_scale=guidance_scale,
-                speed=speed,
-                voice_id=voice_id,
+                params=params,
                 start_time=start_time,
                 metadata=metadata,
             )
         else:
-            # 纯本地模式
-            return self._convert_local(
+            return self._convert_omnivoice(
                 text=text,
                 output_path=output_path,
-                voice_mode=voice_mode,
-                instruct=instruct,
-                ref_audio_path=ref_audio_path,
-                ref_text=ref_text,
-                language=language,
-                num_step=num_step,
-                guidance_scale=guidance_scale,
-                speed=speed,
+                params=params,
                 start_time=start_time,
                 metadata=metadata,
             )
-    
-    def _convert_online_first(
+
+    def _convert_mimo(
         self,
         text: str,
         output_path: str,
-        voice_mode: str = "auto",
-        instruct: Optional[str] = None,
-        ref_audio_path: Optional[str] = None,
-        ref_text: Optional[str] = None,
-        language: Optional[str] = None,
-        num_step: int = 32,
-        guidance_scale: float = 2.0,
-        speed: float = 1.0,
-        voice_id: Optional[str] = None,
-        start_time: float = None,
+        params: Dict[str, Any],
+        start_time: float,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """在线优先模式：每段分别尝试在线，失败用本地"""
-        if start_time is None:
-            start_time = time.time()
-        
-        chunk_size = self.online_chunk_size
+        """在线 MiMo TTS 转换"""
+        if not self.mimo_client:
+            raise Exception("MiMo 客户端未配置")
+
+        voice_mode = params.get("voice_mode", "auto")
+        chunk_size = params.get("chunk_size", self.online_chunk_size)
         chunks = self._split_text(text, chunk_size=chunk_size)
         total_chunks = len(chunks)
-        
-        self._report_progress(f"[混合] 文本分为 {total_chunks} 段，共 {len(text)} 字符", 0)
-        
+
+        self._report_progress(f"[MiMo] 文本分为 {total_chunks} 段，共 {len(text)} 字符", 0)
+
+        import io
         audio_chunks = []
-        sample_rate = 24000  # 在线默认 24kHz
-        online_count = 0
-        local_count = 0
-        
-        # 创建调试输出目录
-        debug_dir = os.path.join(os.path.dirname(output_path), "debug", Path(output_path).stem)
-        os.makedirs(debug_dir, exist_ok=True)
-        print(f"[混合] 调试目录: {debug_dir}")
-        
+        sample_rate = 24000
+
         for i, chunk in enumerate(chunks):
-            chunk_preview = chunk[:30] + "..." if len(chunk) > 30 else chunk
             progress = (i / total_chunks) * 100
-            self._report_progress(f"[混合] 转换第 {i+1}/{total_chunks} 段: {chunk_preview}", progress)
-            print(f"[混合] 转换第 {i+1}/{total_chunks} 段: {chunk_preview}")
-            
-            chunk_start = time.time()
-            audio_tensor = None
-            engine_used = "none"
-            
-            # 先尝试在线 TTS
-            if self.mimo_client:
-                try:
-                    audio_bytes = self.mimo_client.synthesize(
-                        text=chunk,
-                        voice_mode=voice_mode,
-                        voice_id=voice_id or "冰糖",
-                        instruct=instruct,
-                        ref_audio_path=ref_audio_path,
-                        audio_format="wav",
-                        speed=speed,
-                    )
-                    import io
-                    audio_buffer = io.BytesIO(audio_bytes)
-                    audio_tensor, sample_rate = torchaudio.load(audio_buffer)
-                    online_count += 1
-                    engine_used = "online"
-                    print(f"[混合] 第 {i+1} 段在线转换成功")
-                except Exception as e:
-                    logger.warning(f"[混合] 在线 TTS 失败，段 {i+1}: {e}")
-                    print(f"[混合] 在线 TTS 失败，段 {i+1}: {e}")
-            
-            # 在线失败，使用本地 TTS
-            if audio_tensor is None:
-                try:
-                    self.load_model()
-                    audio_tensor = self._generate_single_chunk(
-                        text=chunk,
-                        voice_mode=voice_mode,
-                        instruct=instruct,
-                        ref_audio_path=ref_audio_path,
-                        ref_text=ref_text,
-                        language=language,
-                        num_step=num_step,
-                        guidance_scale=guidance_scale,
-                        speed=speed,
-                    )
-                    sample_rate = self.model.sampling_rate
-                    local_count += 1
-                    engine_used = "local"
-                    print(f"[混合] 第 {i+1} 段本地转换成功")
-                except Exception as e:
-                    logger.error(f"[混合] 本地 TTS 也失败，段 {i+1}: {e}")
-                    print(f"[混合] 本地 TTS 也失败，段 {i+1}: {e}")
-                    raise
-            
-            audio_chunks.append(audio_tensor)
-            
-            # 保存调试文件
-            chunk_base = f"{i+1:03d}_{engine_used}"
-            with open(os.path.join(debug_dir, f"{chunk_base}.txt"), "w", encoding="utf-8") as f:
-                f.write(f"[{engine_used}] {chunk}")
-            torchaudio.save(
-                os.path.join(debug_dir, f"{chunk_base}.wav"),
-                audio_tensor,
-                sample_rate,
+            self._report_progress(f"[MiMo] 转换第 {i+1}/{total_chunks} 段", progress)
+
+            audio_bytes = self.mimo_client.synthesize(
+                text=chunk,
+                voice_mode=voice_mode,
+                voice_id=params.get("voice_id", "冰糖"),
+                instruct=params.get("instruct"),
+                ref_audio_path=params.get("ref_audio_path"),
+                audio_format="wav",
             )
-            
-            chunk_elapsed = time.time() - chunk_start
+            audio_buffer = io.BytesIO(audio_bytes)
+            tensor, sr = torchaudio.load(audio_buffer)
+            audio_chunks.append(tensor)
+
             progress = ((i + 1) / total_chunks) * 100
-            self._report_progress(f"[混合] 第 {i+1}/{total_chunks} 段完成 ({chunk_elapsed:.1f}s)", progress)
-        
+            self._report_progress(f"[MiMo] 第 {i+1}/{total_chunks} 段完成", progress)
+
         # 合并音频
         self._report_progress("正在合并音频...", 95)
         if len(audio_chunks) > 1:
-            silence_duration = 0.3
-            silence = torch.zeros(1, int(silence_duration * sample_rate))
-            merged_audio = audio_chunks[0]
-            for tensor in audio_chunks[1:]:
-                merged_audio = torch.cat([merged_audio, silence, tensor], dim=1)
+            silence = torch.zeros(1, int(0.3 * sample_rate))
+            merged = audio_chunks[0]
+            for t in audio_chunks[1:]:
+                merged = torch.cat([merged, silence, t], dim=1)
         else:
-            merged_audio = audio_chunks[0]
-        
-        elapsed = time.time() - start_time
-        
-        # 保存音频
+            merged = audio_chunks[0]
+
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        torchaudio.save(output_path, merged_audio, sample_rate)
-        
+        torchaudio.save(output_path, merged, sample_rate)
+
         if metadata:
             self._write_metadata(output_path, metadata)
-        
-        duration = merged_audio.shape[-1] / sample_rate
-        rtf = elapsed / duration if duration > 0 else 0
-        self._report_progress(
-            f"[混合] 转换完成: {duration:.1f}s 音频, 耗时 {elapsed:.1f}s "
-            f"(在线 {online_count} 段, 本地 {local_count} 段)", 
-            100
-        )
-        
-        return {
-            "audio_path": output_path,
-            "duration": duration,
-            "sample_rate": sample_rate,
-            "engine": "mixed",
-            "online_chunks": online_count,
-            "local_chunks": local_count,
-        }
+
+        elapsed = time.time() - start_time
+        duration = merged.shape[-1] / sample_rate
+        self._report_progress(f"[MiMo] 完成: {duration:.1f}s ({elapsed:.1f}s)", 100)
+        return {"audio_path": output_path, "duration": duration, "sample_rate": sample_rate, "engine": "online_mimo"}
+
+    def _convert_omnivoice(
+        self,
+        text: str,
+        output_path: str,
+        params: Dict[str, Any],
+        start_time: float,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """本地 OmniVoice TTS 转换"""
+        self.load_model()
+
+        voice_mode = params.get("voice_mode", "auto")
+        chunk_size = params.get("chunk_size", self.chunk_size)
+        chunks = self._split_text(text, chunk_size=chunk_size)
+        total_chunks = len(chunks)
+
+        self._report_progress(f"[OmniVoice] 文本分为 {total_chunks} 段，共 {len(text)} 字符", 0)
+
+        audio_tensors = []
+
+        for i, chunk in enumerate(chunks):
+            progress = (i / total_chunks) * 100
+            self._report_progress(f"[OmniVoice] 转换第 {i+1}/{total_chunks} 段", progress)
+
+            tensor = self._generate_single_chunk(
+                text=chunk,
+                voice_mode=voice_mode,
+                instruct=params.get("instruct"),
+                ref_audio_path=params.get("ref_audio_path"),
+                ref_text=params.get("ref_text"),
+                language=params.get("language"),
+                num_step=params.get("num_step", 32),
+                guidance_scale=params.get("guidance_scale", 2.0),
+                speed=params.get("speed", 1.0),
+            )
+            audio_tensors.append(tensor)
+            progress = ((i + 1) / total_chunks) * 100
+            self._report_progress(f"[OmniVoice] 第 {i+1}/{total_chunks} 段完成", progress)
+
+        self._report_progress("正在合并音频...", 95)
+        if len(audio_tensors) > 1:
+            silence = torch.zeros(1, int(0.3 * self.model.sampling_rate))
+            merged = audio_tensors[0]
+            for t in audio_tensors[1:]:
+                merged = torch.cat([merged, silence, t], dim=1)
+        else:
+            merged = audio_tensors[0]
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        torchaudio.save(output_path, merged, self.model.sampling_rate)
+
+        if metadata:
+            self._write_metadata(output_path, metadata)
+
+        elapsed = time.time() - start_time
+        duration = merged.shape[-1] / self.model.sampling_rate
+        self._report_progress(f"[OmniVoice] 完成: {duration:.1f}s ({elapsed:.1f}s)", 100)
+        return {"audio_path": output_path, "duration": duration, "sample_rate": self.model.sampling_rate, "engine": "local_omnivoice"}
     
     def _convert_online(
         self,

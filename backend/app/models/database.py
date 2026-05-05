@@ -68,7 +68,11 @@ class VoicePreset(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True)
     is_default = Column(Boolean, default=False)
-    voice_mode = Column(String, nullable=False)
+    # 新字段：引擎 + 模式 + JSON 参数
+    engine = Column(String, default="local_omnivoice")  # local_omnivoice | online_mimo
+    voice_mode = Column(String, nullable=False)         # clone | design | auto
+    params = Column(String, nullable=True)              # JSON 参数（引擎专属）
+    # 旧字段（保留用于数据迁移）
     instruct = Column(String, nullable=True)
     ref_audio_path = Column(String, nullable=True)
     ref_text = Column(String, nullable=True)
