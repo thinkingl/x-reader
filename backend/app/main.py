@@ -1106,6 +1106,15 @@ async def test_tts(
             preset_params["speed"] = speed
 
     # 在线模式下确保有 mimo_client
+    if preset_params and preset_params.get("engine") == "online_mimo":
+        if not preset_params.get("voice_id"):
+            preset_params["voice_id"] = configs.get("mimo_default_voice", "冰糖")
+        if configs.get("mimo_api_key") and not task_queue.converter.mimo_client:
+            from app.services.mimo_tts import MiMoTTSClient
+            task_queue.converter.mimo_client = MiMoTTSClient(
+                api_key=configs["mimo_api_key"],
+                base_url=configs.get("mimo_base_url"),
+            )
 
     # 生成临时文件路径
     test_id = str(uuid.uuid4())[:8]
@@ -1115,7 +1124,7 @@ async def test_tts(
         if not task_queue.converter:
             raise HTTPException(500, "TTS 模型未加载")
 
-        if engine == "online":
+        if preset_params and preset_params.get("engine") == "online_mimo":
             chunk_size = int(configs.get("online_chunk_size", "2000"))
         else:
             chunk_size = int(configs.get("local_chunk_size", "200"))
