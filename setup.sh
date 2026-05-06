@@ -11,24 +11,31 @@ INSTALL_DIR="${1:-$SCRIPT_DIR}"
 # 颜色输出
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
 ok()    { echo -e "${GREEN}[OK]${NC}   $1"; }
+err()   { echo -e "${RED}[ERR]${NC}  $1"; }
 
 # ─── 基础检查 ───
 info "检查环境..."
-command -v python3 >/dev/null 2>&1 || { echo "错误: 需要 python3"; exit 1; }
-command -v node    >/dev/null 2>&1 || { echo "错误: 需要 node";  exit 1; }
-command -v npm     >/dev/null 2>&1 || { echo "错误: 需要 npm";   exit 1; }
+command -v python3 >/dev/null 2>&1 || { err "需要 python3"; exit 1; }
 
-NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
+NODE_VERSION=$(node -v 2>/dev/null | sed 's/v//' | cut -d. -f1 || echo 0)
 if [ "$NODE_VERSION" -lt 18 ]; then
-    echo "错误: Node.js version >= 18 required (current: $(node -v))"
-    echo "  - Ubuntu/Debian: curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install nodejs"
-    echo "  - nvm:           nvm install 20 && nvm use 20"
+    err "Node.js version >= 18 required (current: $(node -v 2>/dev/null || echo none))"
+    echo "  安装 Node.js 20:"
+    echo "    # 1. 先清理旧版本（如果存在"
+    echo "    sudo apt autoremove -y nodejs nodejs-doc libnode-dev libnode72"
+    echo "    # 2. 添加 NodeSource 仓库"
+    echo '    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -'
+    echo "    # 3. 安装"
+    echo "    sudo apt install -y nodejs"
     exit 1
 fi
+
+command -v npm >/dev/null 2>&1 || { err "需要 npm (Node.js 安装后应包含 npm)"; exit 1; }
 
 ok "python3: $(python3 --version)"
 ok "node:    $(node --version)"
@@ -63,7 +70,7 @@ ok "Python 依赖安装完成"
 # ─── 安装前端依赖 ───
 info "安装前端依赖..."
 cd "$SCRIPT_DIR/frontend"
-npm install --registry=https://registry.npmmirror.com --silent
+npm install --registry=https://registry.npmmirror.com
 ok "前端依赖安装完成"
 cd "$SCRIPT_DIR"
 
