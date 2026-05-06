@@ -21,6 +21,15 @@ info "检查环境..."
 command -v python3 >/dev/null 2>&1 || { echo "错误: 需要 python3"; exit 1; }
 command -v node    >/dev/null 2>&1 || { echo "错误: 需要 node";  exit 1; }
 command -v npm     >/dev/null 2>&1 || { echo "错误: 需要 npm";   exit 1; }
+
+NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
+if [ "$NODE_VERSION" -lt 18 ]; then
+    echo "错误: Node.js version >= 18 required (current: $(node -v))"
+    echo "  - Ubuntu/Debian: curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install nodejs"
+    echo "  - nvm:           nvm install 20 && nvm use 20"
+    exit 1
+fi
+
 ok "python3: $(python3 --version)"
 ok "node:    $(node --version)"
 ok "npm:     $(npm --version)"
