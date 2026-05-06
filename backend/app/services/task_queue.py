@@ -184,13 +184,39 @@ class TaskQueue:
             self._update_progress(task_id, f"正在转换: {chapter.title[:20]}...", 0)
             self.converter.chunk_size = chunk_size
 
-            result = self.converter.convert_chapter(
-                text=chapter.text_content,
-                output_path=output_path,
-                preset=preset_params,
-                metadata=metadata,
-                progress_callback=progress_cb,
-            )
+            # 带退避重试的转换
+            max_retries = 3
+            last_error = None
+            result = None
+            for attempt in range(max_retries):
+                try:
+                    result = self.converter.convert_chapter(
+                        text=chapter.text_content,
+                        output_path=output_path,
+                        preset=preset_params,
+                        metadata=metadata,
+                        progress_callback=progress_cb,
+                    )
+                    break  # 成功，跳出重试循环
+                except Exception as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        wait_time = attempt + 1  # 1s, 2s, 3s
+                        logger.warning(
+                            f"Task {task_id} attempt {attempt + 1}/{max_retries} failed: {e}. "
+                            f"Retrying in {wait_time}s..."
+                        )
+                        self._update_progress(
+                            task_id,
+                            f"第 {attempt + 1} 次尝试失败，{wait_time}s 后重试...",
+                            0,
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        raise  # 最后一次，抛出异常
+
+            if result is None:
+                raise last_error or Exception("Conversion failed after retries")
 
             if os.path.exists(output_path):
                 chapter.audio_path = output_path

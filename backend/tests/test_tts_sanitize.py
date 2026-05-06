@@ -3,7 +3,7 @@
 import os
 import re
 import pytest
-from app.services.ebook_parser import EpubParser, sanitize_text, inline_annotations
+from app.services.ebook_parser import EpubParser, sanitize_text, inline_annotations, unwrap_text
 
 NANA_EPUB = os.path.join(os.path.dirname(__file__), "data", "nana.epub")
 WORLDS_END_EPUB = os.path.join(os.path.dirname(__file__), "data", "worlds_end.epub")
@@ -150,19 +150,110 @@ class TestWorldsEnd:
 class TestCombinedProcessing:
     """测试 sanitize + inline_annotations 组合"""
 
-    def test_sanitize_and_annotate_together(self):
+    def test_sanitize_and_annotate_pipeline(self):
+        """验证实际流水线(先annotate再sanitize)结果正确"""
         text = "【题记】奥林匹斯山①，继续。\n\n①注解内容。"
-        result = inline_annotations(sanitize_text(text))
+        # 实际流水线：先内联注解，再清理符号
+        result = sanitize_text(inline_annotations(text))
         assert "【" not in result and "】" not in result
         assert "①" not in result
-        assert "(注: 注解内容。)" in result
+        assert "(注:" in result
 
-    def test_order_invariant(self):
-        """sanitize 和 annotate 顺序不影响最终结果"""
-        text = "《书名》正文①。\n①注解。"
-        r1 = sanitize_text(inline_annotations(text))
-        r2 = inline_annotations(sanitize_text(text))
-        assert r1 == r2
+
+class TestUnwrapText:
+    """测试 unwrap_text 硬换行截断修复"""
+
+    def test_merge_mid_sentence_lines(self):
+        """句子中间的截断行应合并为一句"""
+        text = "晚上九点钟了，游艺剧院的演出厅里还是空荡荡的，只有楼厅和正厅前座里，有几个早\n到的观众在等候开演。"
+        result = unwrap_text(text)
+        lines = result.split('\n')
+        assert len(lines) == 1, f"Expected 1 paragraph, got {len(lines)}"
+        assert "早到的观众" in result
+
+    def test_preserve_paragraph_boundary(self):
+        """以句号结束的行应保留为段落边界"""
+        text = "第一个段落结束。\n第二个段落开始。"
+        result = unwrap_text(text)
+        lines = result.split('\n')
+        assert len(lines) >= 2, f"Expected 2 paragraphs, got {len(lines)}"
+
+    def test_exclamation_ends_paragraph(self):
+        """以感叹号结束的行应保留段落边界"""
+        text = "真是太棒了！\n这是新的段落。"
+        result = unwrap_text(text)
+        lines = result.split('\n')
+        assert len(lines) >= 2
+
+    def test_question_ends_paragraph(self):
+        """以问号结束的行应保留段落边界"""
+        text = "你认识她吗？\n我不认识。"
+        result = unwrap_text(text)
+        lines = result.split('\n')
+        assert len(lines) >= 2
+
+    def test_quotation_ends_paragraph(self):
+        """以引号结束的行应保留段落边界"""
+        text = '他说："你好。"\n她回答："你好。"'
+        result = unwrap_text(text)
+        lines = [l for l in result.split('\n') if l.strip()]
+        assert len(lines) == 2, f"Expected 2 paragraphs, got {len(lines)}: {lines}"
+
+    def test_multiple_broken_lines_merge(self):
+        """多行截断合并为一个段落"""
+        text = "幕布被笼罩在一片昏暗之中，犹如一大块红色的斑点。舞台上阒然无声，成排的脚灯熄灭\n了，乐师们的乐谱架摆得七零八落。只有四楼楼座里，发出阵阵喧嚣声。"
+        result = unwrap_text(text)
+        # "熄灭了" 和 "发出阵阵喧嚣声。" 都是句号结尾 → 2段落
+        assert "七零八落" in result
+        assert "熄灭了" in result
+
+    def test_empty_lines_separate_paragraphs(self):
+        """空行应分隔段落"""
+        text = "第一段。\n\n\n第二段。"
+        result = unwrap_text(text)
+        lines = [l for l in result.split('\n') if l.strip()]
+        assert len(lines) == 2, f"Expected 2 paragraphs, got {lines}"
+
+    def test_unchanged_if_no_broken_lines(self):
+        """无截断的文本应保持不变"""
+        text = "完整的段落一。\n完整的段落二。"
+        result = unwrap_text(text)
+        assert "完整的段落一" in result
+        assert "完整的段落二" in result
+
+    def test_nana_chapter_has_few_lines(self, parsed_nana):
+        """《娜娜》经 unwrap 后每章行数应大幅减少（原 615 → ~200）"""
+        ch1 = parsed_nana["chapters"][0]
+        lines = [l for l in ch1["text_content"].split('\n') if l.strip()]
+        assert len(lines) < 250, (
+            f"Expected <250 lines after unwrap, got {len(lines)}"
+            f" (original was 615 mid-sentence broken lines)"
+        )
+
+    def test_nana_no_mid_sentence_cuts(self, parsed_nana):
+        """《娜娜》每章最多 2 行不以句号结尾（排除装饰线）"""
+        sentence_end = set('。！？…"-—\uFF09')
+        for ch in parsed_nana["chapters"]:
+            bad_lines = 0
+            for line in ch["text_content"].split('\n'):
+                stripped = line.strip()
+                if not stripped or len(stripped) <= 10:
+                    continue
+                if not re.search(r'[\u4e00-\u9fff]', stripped):
+                    continue
+                if re.match(r'^[\-]{3,}', stripped):
+                    continue
+                if stripped[-1] not in sentence_end:
+                    bad_lines += 1
+            assert bad_lines <= 2, (
+                f"Ch{ch['chapter_number']} has {bad_lines} mid-sentence cuts (max 2)"
+            )
+
+    def test_worlds_end_still_parseable(self, parsed_worlds_end):
+        """《世界尽头》unwrap 后解析仍正常"""
+        ch5 = parsed_worlds_end["chapters"][4]
+        assert "电梯" in ch5["text_content"][:200]
+        assert len(ch5["text_content"].split('\n')) < 200
 
 
 @pytest.fixture

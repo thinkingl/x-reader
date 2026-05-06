@@ -73,22 +73,42 @@ _TTS_NONSPEECH_RE = re.compile(r'[《》〈〉「」『』【】〖〗♦●◆�
 
 _MULTI_BLANK_RE = re.compile(r'\n{3,}')
 
+# 句子结束字符（中文+英文），或连续3个以上装饰符号
+_SENTENCE_END_RE = re.compile(r'[。！？…"」』）》\.!\?"\'\uFF09]$|[\-—]{3,}$')
 
-def sanitize_text(text: str) -> str:
-    """清理 TTS 不适用的符号，规范化空白，移除纯装饰行"""
-    text = _TTS_NONSPEECH_RE.sub(' ', text)
-    text = _MULTI_BLANK_RE.sub('\n\n', text)
-    # 移除纯装饰行：不含任何可读内容（中文、英文字母、数字）
+
+def unwrap_text(text: str) -> str:
+    """将硬换行截断的文本合并为完整段落：不以句号结尾的行与下一行合并"""
     lines = text.split('\n')
-    cleaned = []
-    for line in lines:
+    merged = []
+    buffer = []
+    
+    for i, line in enumerate(lines):
         stripped = line.strip()
         if not stripped:
+            if buffer:
+                merged.append(''.join(buffer))
+                buffer = []
             continue
-        # 至少包含一些可读内容
-        if re.search(r'[\u4e00-\u9fff]|[a-zA-Z]|\d', stripped):
-            cleaned.append(line)
-    text = '\n'.join(cleaned)
+        
+        buffer.append(stripped)
+        
+        # 当前行以句子结束符结尾 → 这是一个段落边界
+        if _SENTENCE_END_RE.search(stripped):
+            merged.append(''.join(buffer))
+            buffer = []
+    
+    if buffer:
+        merged.append(''.join(buffer))
+    
+    return '\n\n'.join(merged)
+
+
+def sanitize_text(text: str) -> str:
+    """清理 TTS 不适用的符号，规范化空白，合并被硬换行截断的句子"""
+    text = _TTS_NONSPEECH_RE.sub(' ', text)
+    text = _MULTI_BLANK_RE.sub('\n\n', text)
+    text = unwrap_text(text)
     text = text.strip()
     return text
 
