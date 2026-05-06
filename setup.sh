@@ -46,15 +46,15 @@ fi
 # ─── 安装 Python 依赖 ───
 info "安装 Python 依赖..."
 source "$VENV_PATH/bin/activate"
-pip install --upgrade pip -q 2>/dev/null
-pip install -r "$SCRIPT_DIR/backend/requirements.txt" 2>&1 | tail -5
+pip install --upgrade pip -q -i https://mirrors.aliyun.com/pypi/simple/ 2>/dev/null
+pip install -r "$SCRIPT_DIR/backend/requirements.txt" -i https://mirrors.aliyun.com/pypi/simple/ 2>&1 | tail -5
 deactivate 2>/dev/null || true
 ok "Python 依赖安装完成"
 
 # ─── 安装前端依赖 ───
 info "安装前端依赖..."
 cd "$SCRIPT_DIR/frontend"
-npm install --silent
+npm install --registry=https://registry.npmmirror.com --silent
 ok "前端依赖安装完成"
 cd "$SCRIPT_DIR"
 
