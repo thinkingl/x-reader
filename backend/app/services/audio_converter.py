@@ -101,8 +101,8 @@ class AudioConverter:
             return [text]
 
         chunks = []
-        # 按句子分隔符分割
-        sentences = re.split(r'([。！？；\n])', text)
+        # 按句子分隔符分割（中文 + 英文）
+        sentences = re.split(r'([。！？；\n\.!\?])', text)
 
         current_chunk = ""
         for i, part in enumerate(sentences):
@@ -110,11 +110,20 @@ class AudioConverter:
                 current_chunk += part
             else:
                 if current_chunk.strip():
-                    chunks.append(current_chunk.strip())
+                    # 单个句子超过限制时，在次级标点处拆分
+                    if len(current_chunk) > chunk_size:
+                        for sub in self._split_by_secondary_punct(current_chunk, chunk_size):
+                            chunks.append(sub.strip())
+                    else:
+                        chunks.append(current_chunk.strip())
                 current_chunk = part
 
         if current_chunk.strip():
-            chunks.append(current_chunk.strip())
+            if len(current_chunk) > chunk_size:
+                for sub in self._split_by_secondary_punct(current_chunk, chunk_size):
+                    chunks.append(sub.strip())
+            else:
+                chunks.append(current_chunk.strip())
 
         # 合并过短的段落
         merged_chunks = []
@@ -130,6 +139,22 @@ class AudioConverter:
             merged_chunks.append(temp)
 
         return merged_chunks if merged_chunks else [text]
+
+    def _split_by_secondary_punct(self, text: str, chunk_size: int) -> List[str]:
+        """在次级标点（逗号、分号、冒号、空格）处拆分超长句子"""
+        parts = re.split(r'([,，;；:：\s])', text)
+        chunks = []
+        current = ""
+        for part in parts:
+            if len(current) + len(part) <= chunk_size:
+                current += part
+            else:
+                if current.strip():
+                    chunks.append(current.strip())
+                current = part
+        if current.strip():
+            chunks.append(current.strip())
+        return chunks if chunks else [text]
 
     def _generate_single_chunk(
         self,

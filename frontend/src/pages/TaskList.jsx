@@ -10,7 +10,6 @@ function TaskList() {
   const [statusFilter, setStatusFilter] = useState(null);
   const [bookFilter, setBookFilter] = useState(null);
   const [books, setBooks] = useState([]);
-  const [chapters, setChapters] = useState({});
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const navigate = useNavigate();
 
@@ -46,17 +45,6 @@ function TaskList() {
         });
       });
       setPagination(prev => ({ ...prev, total: res.data.total }));
-
-      // Fetch chapter info for each task
-      const chapterIds = [...new Set(res.data.items.map(t => t.chapter_id))];
-      const chaptersMap = {};
-      for (const chId of chapterIds) {
-        try {
-          const chRes = await api.get(`/api/chapters/${chId}`);
-          chaptersMap[chId] = chRes.data;
-        } catch (e) {}
-      }
-      setChapters(chaptersMap);
     } catch (err) {
       message.error('获取任务列表失败');
     }
@@ -134,12 +122,12 @@ function TaskList() {
       title: '章节',
       dataIndex: 'chapter_id',
       width: 200,
-      render: (chapterId) => {
-        const chapter = chapters[chapterId];
-        if (chapter) {
+      render: (chapterId, record) => {
+        if (record.chapter_number != null) {
+          const title = record.chapter_title || '';
           return (
-            <Tooltip title={`第${chapter.chapter_number}章 - ${chapter.title}`}>
-              <span>第{chapter.chapter_number}章: {chapter.title?.substring(0, 15)}{chapter.title?.length > 15 ? '...' : ''}</span>
+            <Tooltip title={`第${record.chapter_number}章 - ${title}`}>
+              <span>第{record.chapter_number}章: {title.substring(0, 15)}{title.length > 15 ? '...' : ''}</span>
             </Tooltip>
           );
         }

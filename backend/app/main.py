@@ -551,6 +551,20 @@ def list_tasks(
         query = query.filter(Task.book_id == book_id)
     total = query.count()
     tasks = query.order_by(Task.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    # 批量填充章节和图书信息（避免前端 N+1 请求）
+    if tasks:
+        chapter_ids = [t.chapter_id for t in tasks]
+        book_ids = list(set(t.book_id for t in tasks))
+        chapters_map = {c.id: c for c in db.query(Chapter).filter(Chapter.id.in_(chapter_ids)).all()}
+        books_map = {b.id: b for b in db.query(Book).filter(Book.id.in_(book_ids)).all()}
+        for task in tasks:
+            ch = chapters_map.get(task.chapter_id)
+            bk = books_map.get(task.book_id)
+            task.chapter_number = ch.chapter_number if ch else None
+            task.chapter_title = ch.title if ch else None
+            task.book_title = bk.title if bk else None
+
     return TaskList(items=tasks, total=total)
 
 
