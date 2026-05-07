@@ -127,6 +127,10 @@ class TaskQueue:
             if task.voice_preset_id:
                 voice_preset = db.query(VoicePreset).filter(VoicePreset.id == task.voice_preset_id).first()
 
+            # 记录使用的预设名称
+            chapter.voice_preset_name = voice_preset.name if voice_preset else None
+            db.commit()
+
             if voice_preset:
                 preset_params = {
                     "engine": voice_preset.engine or "local_omnivoice",

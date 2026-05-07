@@ -13,6 +13,12 @@ import logging
 import urllib.parse
 from pathlib import Path
 from datetime import datetime
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
 from concurrent.futures import ThreadPoolExecutor
 
 from app.database import get_db, init_db
@@ -104,6 +110,11 @@ def startup():
         pass  # 列已存在
     try:
         db.execute(text("ALTER TABLE voice_presets ADD COLUMN params TEXT"))
+        db.commit()
+    except Exception:
+        pass  # 列已存在
+    try:
+        db.execute(text("ALTER TABLE chapters ADD COLUMN voice_preset_name VARCHAR"))
         db.commit()
     except Exception:
         pass  # 列已存在
@@ -585,6 +596,7 @@ def list_tasks(
             task.chapter_number = ch.chapter_number if ch else None
             task.chapter_title = ch.title if ch else None
             task.book_title = bk.title if bk else None
+            task.voice_preset_name = ch.voice_preset_name if ch else None
 
     return TaskList(items=tasks, total=total)
 

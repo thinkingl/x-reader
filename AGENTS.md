@@ -99,18 +99,37 @@ docker-compose down    # 停止服务
 - 后端 FastAPI + 任务队列 + 电子书解析器 + 音频转换服务
 - 前端 React 应用（5 页面 + 全局浮动播放器 + 实时进度）
 - 语音预设管理（设计/克隆/自动模式）+ ASR 自动转录
-- 50 个后端测试，iOS SwiftUI 客户端
+- 50+ 后端测试，iOS SwiftUI 客户端
 - 音频下载功能：按章节下载 + 整本书 zip 打包下载
 - 前端代理配置：Vite proxy 转发 API 请求
 - 认证功能：Challenge-Response + JWT Token
-- Docker 支持
+- Docker 支持 (CUDA + GPU passthrough)
 - 在线 TTS 支持：小米 MiMo V2.5 API，支持在线优先+失败回退
 - 任务状态管理：pending → queued → running → completed/failed
 - 任务列表后端分页，章节内容查看，播放缓存修复
 - Android Kotlin/Jetpack Compose 客户端（自适应布局，支持手机和平板）
+- EPUB 章节目录文本级拆分（支持第X章/中文数字/特殊标记）
+- EPUB 圆圈数字注解内联 (`①` → `(注: xxx)`)
+- EPUB TTS 文本清理：移除《》等非语音符号
+- EPUB 硬换行截断修复 (`unwrap_text`)：合并不以句号结尾的断行
+- 章节列表分页 API (`ChapterListItem`/`ChapterListResponse`，排除 `text_content`)
+- 转换失败退避重试：最多 3 次，间隔 1s/2s/3s
+- SQLite 连接池优化（`StaticPool` 避免连接池耗尽）
+- TTS 超时配置 (`tts_timeout`，默认 120s，前端可配置)
+- 英文分句支持 + 超长句次级标点拆分
+- 容器优雅重启：shutdown 保存任务状态，startup 自动恢复
+- 转换任务的语音预设名称记录与展示
+- 任务列表按状态筛选
+- 测试数据：`tests/data/nana.epub` + `tests/data/worlds_end.epub`
+- 单元测试：ebook_parser (10), nana_epub (12), tts_sanitize (30), split_text (19)
 
-### 待修复
+### 待修复 / 待优化
 - PDF 按目录书签分章
 - 上传文件大小限制 / 进度显示
 - 转换任务暂停/恢复
 - 语音预设导入/导出 (JSON 格式)
+- MOBI 格式支持（`mobi` 包需在 Docker 镜像构建时安装，目前手动安装于运行容器）
+- 章节列表增量更新 + 智能轮询（仅转换中刷新）
+- 前端表格列宽自适应 + 水平滚动
+- 日志时间戳格式
+- 前端时长显示格式（x时x分x秒）

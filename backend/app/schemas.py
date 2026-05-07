@@ -84,6 +84,7 @@ class ChapterListItem(BaseModel):
     audio_path: Optional[str]
     audio_duration: Optional[float]
     status: str
+    voice_preset_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -114,6 +115,7 @@ class TaskResponse(BaseModel):
     chapter_number: Optional[int] = None
     chapter_title: Optional[str] = None
     book_title: Optional[str] = None
+    voice_preset_name: Optional[str] = None
     voice_preset_id: Optional[int]
     status: TaskStatusEnum
     error_message: Optional[str]

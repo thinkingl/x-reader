@@ -317,6 +317,16 @@ function BookDetail() {
     setReparsing(false);
   };
 
+  const formatDuration = (seconds) => {
+    if (!seconds || seconds < 1) return '-';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.round(seconds % 60);
+    if (h > 0) return `${h}时${m}分${s}秒`;
+    if (m > 0) return `${m}分${s}秒`;
+    return `${s}秒`;
+  };
+
   const formatElapsed = (seconds) => {
     if (!seconds) return '';
     const mins = Math.floor(seconds / 60);
@@ -325,13 +335,20 @@ function BookDetail() {
   };
 
   const columns = [
-    { title: '章节', dataIndex: 'chapter_number', width: 80 },
+    { title: '章节', dataIndex: 'chapter_number', width: 60 },
     { title: '标题', dataIndex: 'title', ellipsis: true },
-    { title: '字数', dataIndex: 'word_count', width: 100 },
+    { title: '字数', dataIndex: 'word_count', width: 80 },
+    {
+      title: '预设',
+      dataIndex: 'voice_preset_name',
+      width: 100,
+      ellipsis: true,
+      render: (name) => name || <span style={{ color: '#999' }}>未记录</span>,
+    },
     {
       title: '状态',
       dataIndex: 'status',
-      width: 200,
+      width: 130,
       render: (status, record) => {
         const statusMap = {
           pending: { color: 'default', text: '待转换' },
@@ -372,12 +389,12 @@ function BookDetail() {
     {
       title: '时长',
       dataIndex: 'audio_duration',
-      width: 80,
-      render: (d) => d ? `${d.toFixed(1)}s` : '-',
+      width: 70,
+      render: (d) => formatDuration(d),
     },
     {
       title: '操作',
-      width: 200,
+      width: 180,
       render: (_, record) => (
         <Space size={4}>
           <Tooltip title="查看内容">
@@ -522,6 +539,7 @@ function BookDetail() {
         columns={columns}
         dataSource={chapters}
         rowKey="id"
+        scroll={{ x: 700 }}
         pagination={{
           current: tablePage,
           pageSize: tablePageSize,

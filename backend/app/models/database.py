@@ -43,6 +43,7 @@ class Chapter(Base):
     audio_path = Column(String, nullable=True)
     audio_duration = Column(Float, nullable=True)
     status = Column(String, default="pending")
+    voice_preset_name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

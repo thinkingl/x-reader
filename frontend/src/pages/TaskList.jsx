@@ -112,7 +112,8 @@ function TaskList() {
     {
       title: '图书',
       dataIndex: 'book_id',
-      width: 150,
+      width: 120,
+      ellipsis: true,
       render: (bookId) => {
         const book = books.find(b => b.id === bookId);
         return book?.title || bookId;
@@ -121,7 +122,7 @@ function TaskList() {
     {
       title: '章节',
       dataIndex: 'chapter_id',
-      width: 200,
+      width: 180,
       render: (chapterId, record) => {
         if (record.chapter_number != null) {
           const title = record.chapter_title || '';
@@ -137,11 +138,18 @@ function TaskList() {
     {
       title: '状态',
       dataIndex: 'status',
-      width: 100,
+      width: 80,
       render: (status) => {
         const s = statusMap[status] || { color: 'default', text: status };
         return <Tag color={s.color}>{s.text}</Tag>;
       },
+    },
+    {
+      title: '预设',
+      dataIndex: 'voice_preset_name',
+      width: 100,
+      ellipsis: true,
+      render: (name) => name || <span style={{ color: '#999' }}>未记录</span>,
     },
     {
       title: '错误信息',
@@ -261,6 +269,7 @@ function TaskList() {
         columns={columns}
         dataSource={tasks}
         rowKey="id"
+        scroll={{ x: 750 }}
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,
