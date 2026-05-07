@@ -126,14 +126,33 @@ def startup():
     if stuck_chapters:
         db.commit()
 
-    # 3. 重新提交所有 QUEUED + PENDING 任务
-    resubmit_tasks = db.query(Task).filter(
-        Task.status.in_([TaskStatus.QUEUED, TaskStatus.PENDING])
-    ).all()
-    for task in resubmit_tasks:
-        task_queue.submit_task(task.id, db)
-    if resubmit_tasks:
-        logger.info(f"已重新提交 {len(resubmit_tasks)} 个任务")
+    # 迁移旧 VoicePreset 数据（在 db.close() 之前）
+    import json
+    migrated = 0
+    presets = db.query(VoicePreset).filter(VoicePreset.engine == None).all()
+    for p in presets:
+        if p.engine is not None:
+            continue
+        p.engine = "local_omnivoice"
+        params = {}
+        if p.instruct:
+            params["instruct"] = p.instruct
+        if p.ref_audio_path:
+            params["ref_audio_path"] = p.ref_audio_path
+        if p.ref_text:
+            params["ref_text"] = p.ref_text
+        if p.language:
+            params["language"] = p.language
+        params["num_step"] = p.num_step or 32
+        params["guidance_scale"] = p.guidance_scale or 2.0
+        params["speed"] = p.speed or 1.0
+        if p.voice_mode:
+            params["voice_mode"] = p.voice_mode
+        p.params = json.dumps(params, ensure_ascii=False)
+        migrated += 1
+    if migrated:
+        db.commit()
+        logger.info(f"已迁移 {migrated} 个语音预设到新版格式")
 
     configs = {c.key: c.value for c in db.query(SystemConfig).all()}
     db.close()
@@ -156,31 +175,16 @@ def startup():
     # 配置在线 TTS
     task_queue.configure_online_tts()
 
-    # 迁移旧 VoicePreset 数据
-    import json
-    migrated = 0
-    presets = db.query(VoicePreset).filter(VoicePreset.engine == None).all()
-    for p in presets:
-        if p.engine is not None:
-            continue
-        p.engine = "local_omnivoice"
-        params = {}
-        if p.instruct:
-            params["instruct"] = p.instruct
-        if p.ref_audio_path:
-            params["ref_audio_path"] = p.ref_audio_path
-        if p.ref_text:
-            params["ref_text"] = p.ref_text
-        if p.language:
-            params["language"] = p.language
-        params["num_step"] = p.num_step or 32
-        params["guidance_scale"] = p.guidance_scale or 2.0
-        params["speed"] = p.speed or 1.0
-        p.params = json.dumps(params)
-        migrated += 1
-    if migrated:
-        db.commit()
-        logger.info(f"已迁移 {migrated} 个旧预设到新格式")
+    # 3. 重新提交所有 QUEUED + PENDING 任务（必须在 converter 初始化后）
+    db = next(get_db())
+    resubmit_tasks = db.query(Task).filter(
+        Task.status.in_([TaskStatus.QUEUED, TaskStatus.PENDING])
+    ).all()
+    for task in resubmit_tasks:
+        task_queue.submit_task(task.id, db)
+    if resubmit_tasks:
+        logger.info(f"已重新提交 {len(resubmit_tasks)} 个任务")
+    db.close()
 
     # 从配置读取并发数并更新
     concurrency = int(configs.get("concurrency", "1"))
@@ -194,6 +198,23 @@ def startup():
 
 @app.on_event("shutdown")
 def shutdown():
+    """优雅退出：将进行中的任务标记为 QUEUED，下次启动可自动恢复"""
+    db = next(get_db())
+    try:
+        running = db.query(Task).filter(Task.status == TaskStatus.RUNNING).all()
+        for task in running:
+            task.status = TaskStatus.QUEUED
+            task.started_at = None
+            chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
+            if chapter and chapter.status == "converting":
+                chapter.status = "pending"
+        if running:
+            db.commit()
+            logger.info(f"已保存 {len(running)} 个进行中的任务状态，重启后可恢复")
+    except Exception as e:
+        logger.warning(f"保存任务状态失败: {e}")
+    finally:
+        db.close()
     task_queue.shutdown()
 
 
@@ -1129,6 +1150,22 @@ async def test_tts(
                 api_key=configs["mimo_api_key"],
                 base_url=configs.get("mimo_base_url"),
             )
+
+    # 清理旧的测试音频（保留最新 5 个）
+    test_dir = "data/audio"
+    try:
+        test_files = sorted(
+            [f for f in os.listdir(test_dir) if f.startswith("test_") and not f.endswith("/")],
+            key=lambda f: os.path.getmtime(os.path.join(test_dir, f)),
+            reverse=True,
+        )
+        for old_file in test_files[5:]:
+            try:
+                os.remove(os.path.join(test_dir, old_file))
+            except OSError:
+                pass
+    except Exception:
+        pass
 
     # 生成临时文件路径
     test_id = str(uuid.uuid4())[:8]

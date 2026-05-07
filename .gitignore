@@ -63,3 +63,6 @@ logs/
 # Large model files
 *.safetensors
 *.bin
+
+# Docker volume data (host-mounted)
+data/
