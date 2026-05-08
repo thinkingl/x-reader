@@ -19,7 +19,8 @@ class TaskQueue:
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.converter: Optional[AudioConverter] = None
         self.futures: Dict[int, Future] = {}
-        self.progress: Dict[int, Dict] = {}  # task_id -> {message, start_time}
+        self.progress: Dict[int, Dict] = {}
+        self.cancelled: set = set()  # 被取消的任务 ID 集合
 
     def set_converter(self, converter: AudioConverter):
         self.converter = converter
@@ -50,6 +51,17 @@ class TaskQueue:
 
     def get_progress(self, task_id: int) -> Optional[Dict]:
         return self.progress.get(task_id)
+
+    def cancel_task(self, task_id: int):
+        """取消正在运行或排队的任务"""
+        self.cancelled.add(task_id)
+        if self.converter:
+            self.converter._cancelled = True
+        future = self.futures.get(task_id)
+        if future and not future.done():
+            future.cancel()
+        if task_id in self.progress:
+            self.progress[task_id]["message"] = "任务已取消"
 
     def _update_progress(self, task_id: int, message: str, progress: float = None):
         if task_id in self.progress:
@@ -157,6 +169,7 @@ class TaskQueue:
             # 根据引擎选择分段大小
             if preset_params and preset_params.get("engine") == "online_mimo":
                 chunk_size = int(configs.get("online_chunk_size", "2000"))
+                chunk_size_en = int(configs.get("online_chunk_size_en", "400"))
                 if configs.get("mimo_api_key") and not self.converter.mimo_client:
                     from app.services.mimo_tts import MiMoTTSClient
                     self.converter.mimo_client = MiMoTTSClient(
@@ -165,6 +178,9 @@ class TaskQueue:
                     )
             else:
                 chunk_size = int(configs.get("local_chunk_size", "200"))
+                chunk_size_en = int(configs.get("local_chunk_size_en", "120"))
+            self.converter.chunk_size = chunk_size
+            self.converter.chunk_size_en = chunk_size_en
 
             # 生成文件路径
             safe_title = "".join(c for c in chapter.title if c.isalnum() or c in " _-").strip()[:30] if chapter.title else ""
@@ -184,15 +200,13 @@ class TaskQueue:
 
             def progress_cb(msg, progress=None):
                 self._update_progress(task_id, msg, progress)
-
-            self._update_progress(task_id, f"正在转换: {chapter.title[:20]}...", 0)
-            self.converter.chunk_size = chunk_size
-
-            # 带退避重试的转换
             max_retries = 3
             last_error = None
             result = None
             for attempt in range(max_retries):
+                if task_id in self.cancelled:
+                    raise Exception("任务已取消")
+                    
                 try:
                     result = self.converter.convert_chapter(
                         text=chapter.text_content,
@@ -235,22 +249,27 @@ class TaskQueue:
             db.commit()
 
         except Exception as e:
-            logger.error(f"Task {task_id} failed: {e}")
+            is_cancelled = "任务已取消" in str(e)
+            status = TaskStatus.CANCELLED if is_cancelled else TaskStatus.FAILED
+            logger.error(f"Task {task_id} {'cancelled' if is_cancelled else 'failed'}: {e}")
             try:
                 task = db.query(Task).filter(Task.id == task_id).first()
                 if task:
-                    task.status = TaskStatus.FAILED
-                    task.error_message = str(e)
+                    task.status = status
+                    task.error_message = str(e) if not is_cancelled else None
                     task.finished_at = datetime.utcnow()
-                    # 更新章节状态为失败
                     chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
                     if chapter and chapter.status == "converting":
-                        chapter.status = "failed"
+                        chapter.status = "pending"
                     db.commit()
-            except:
-                pass
+            except Exception as cleanup_err:
+                logger.error(f"Task {task_id} cleanup also failed: {cleanup_err}")
         finally:
             db.close()
+            self.cancelled.discard(task_id)
+            # 重置 converter 的取消标志（下一个任务不应被取消）
+            if self.converter and not self.cancelled:
+                self.converter._cancelled = False
             if task_id in self.futures:
                 del self.futures[task_id]
             if task_id in self.progress:

@@ -357,6 +357,7 @@ function BookDetail() {
           completed: { color: 'success', text: '已完成' },
           failed: { color: 'error', text: '失败' },
           skipped: { color: 'warning', text: '跳过' },
+          cancelled: { color: 'default', text: '已取消' },
         };
         const s = statusMap[status] || { color: 'default', text: status };
 

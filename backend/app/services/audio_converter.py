@@ -27,7 +27,9 @@ class AudioConverter:
         self.model = None
         self.progress_callback: Optional[Callable] = None
         self.chunk_size = 200  # 每段文本的最大字符数
-        self._local = threading.local()  # 线程本地存储，用于并发安全的回调
+        self.chunk_size_en = 120  # 英文分段大小
+        self._local = threading.local()
+        self._cancelled = False  # 取消标志  # 线程本地存储，用于并发安全的回调
         
         # 在线 TTS 配置
         self.tts_mode = "local"  # local | online | online_first
@@ -57,6 +59,8 @@ class AudioConverter:
                 logger.warning("在线 TTS 模式但未提供 API Key")
 
     def _report_progress(self, message: str, progress: float = None):
+        if self._cancelled:
+            raise Exception("任务已取消")
         cb = getattr(self._local, 'progress_callback', None) or self.progress_callback
         if cb:
             cb(message, progress)
@@ -98,10 +102,21 @@ class AudioConverter:
                 )
                 self._report_progress(f"模型加载完成 (设备: {self.device})")
 
-    def _split_text(self, text: str, chunk_size: int = None) -> List[str]:
-        """将长文本按标点符号分段"""
+    def _split_text(self, text: str, chunk_size: int = None, chunk_size_en: int = None) -> List[str]:
+        """将长文本按标点符号分段，根据文本语言选择分段大小"""
+        explicit_size = chunk_size is not None
+        
         if chunk_size is None:
             chunk_size = self.chunk_size
+        if chunk_size_en is None:
+            chunk_size_en = self.chunk_size_en
+        
+        # 检测语言并自动切换分段大小（仅在未显式指定 chunk_size 时）
+        if not explicit_size:
+            chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+            total_chars = sum(1 for c in text if c.isalpha() or '\u4e00' <= c <= '\u9fff')
+            is_chinese = total_chars > 0 and chinese_chars / total_chars > 0.3
+            chunk_size = chunk_size if is_chinese else chunk_size_en
         
         if len(text) <= chunk_size:
             return [text]
@@ -147,20 +162,83 @@ class AudioConverter:
         return merged_chunks if merged_chunks else [text]
 
     def _split_by_secondary_punct(self, text: str, chunk_size: int) -> List[str]:
-        """在次级标点（逗号、分号、冒号、空格）处拆分超长句子"""
-        parts = re.split(r'([,，;；:：\s])', text)
+        """在次级标点处拆分超长句子，优先级：逗号分号 > 冒号 > 空格"""
+        split_points = []
+        # 逗号分号（优先级1）
+        for m in re.finditer(r';|；', text):
+            split_points.append((m.end(), 1))
+        for m in re.finditer(r',|，', text):
+            split_points.append((m.end(), 1))
+        # 冒号（优先级2）
+        for m in re.finditer(r':|：', text):
+            split_points.append((m.end(), 2))
+        # 空格（优先级3）
+        for m in re.finditer(r'\s', text):
+            split_points.append((m.end(), 3))
+        
+        if not split_points:
+            if len(text) > chunk_size:
+                return self._split_anywhere(text, chunk_size)
+            return [text]
+        
+        split_points.sort(key=lambda x: x[0])  # 按位置排序
+        
         chunks = []
-        current = ""
-        for part in parts:
-            if len(current) + len(part) <= chunk_size:
-                current += part
-            else:
-                if current.strip():
-                    chunks.append(current.strip())
-                current = part
-        if current.strip():
-            chunks.append(current.strip())
+        start = 0
+        for i in range(len(split_points)):
+            pos, pri = split_points[i]
+            if pos - start <= chunk_size:
+                continue  # 还没超限，继续往后看
+            
+            # 当前已超限，在 [start, pos) 范围内找最佳拆分点
+            # 从右往左找最高优先级的点
+            best = None
+            for j in range(i - 1, -1, -1):
+                pj, pj_pri = split_points[j]
+                if pj_pri <= (best[1] if best else 3):
+                    best = (pj, pj_pri)
+                if pj_pri == 1:  # 遇到逗号分号，直接使用
+                    break
+            
+            if best and best[0] - start > 0:
+                chunk = text[start:best[0]].strip()
+                if chunk:
+                    chunks.append(chunk)
+                start = best[0]
+        
+        # 最后一段
+        if start < len(text):
+            chunk = text[start:].strip()
+            if chunk:
+                if len(chunk) > chunk_size:
+                    # 最后一段仍然超长，退化为简单拆分
+                    for sub in self._split_anywhere(chunk, chunk_size):
+                        chunks.append(sub)
+                else:
+                    chunks.append(chunk)
+        
         return chunks if chunks else [text]
+    
+    def _split_anywhere(self, text: str, chunk_size: int) -> List[str]:
+        """退避方案：按空格强制拆分，无空格时按字符等长拆分"""
+        chunks = []
+        words = text.split()
+        if len(words) > 1:
+            current = ""
+            for word in words:
+                if len(current) + len(word) + 1 <= chunk_size:
+                    current = (current + " " + word).strip()
+                else:
+                    if current:
+                        chunks.append(current)
+                    current = word
+            if current:
+                chunks.append(current)
+        else:
+            # 无空格，按字符等长拆分
+            for i in range(0, len(text), chunk_size):
+                chunks.append(text[i:i+chunk_size])
+        return chunks
 
     def _generate_single_chunk(
         self,

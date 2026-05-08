@@ -327,9 +327,17 @@ function Configuration() {
         <Form.Item 
           label="本地文本分段大小（字符）" 
           name="local_chunk_size"
-          extra="每段文本的最大字符数，影响内存占用和处理速度"
+          extra="中文文本每段最大字符数"
         >
           <InputNumber min={50} max={500} step={10} style={{ width: '100%' }} />
+        </Form.Item>
+
+        <Form.Item 
+          label="本地英文分段大小（字符）" 
+          name="local_chunk_size_en"
+          extra="英文文本每段最大字符数（默认较小，英文单词密集）"
+        >
+          <InputNumber min={50} max={300} step={10} style={{ width: '100%' }} />
         </Form.Item>
 
         <Form.Item 
@@ -349,9 +357,17 @@ function Configuration() {
         <Form.Item 
           label="在线文本分段大小（字符）" 
           name="online_chunk_size"
-          extra="每段最大字符数。V2.5 单次支持 2500 字，建议 1500-2000 字以保稳定"
+          extra="中文文本每段最大字符数。V2.5 单次支持 2500 字"
         >
           <InputNumber min={200} max={2500} step={100} style={{ width: '100%' }} />
+        </Form.Item>
+
+        <Form.Item 
+          label="在线英文分段大小（字符）" 
+          name="online_chunk_size_en"
+          extra="英文文本每段最大字符数（默认较小）"
+        >
+          <InputNumber min={100} max={1000} step={50} style={{ width: '100%' }} />
         </Form.Item>
 
         <Form.Item 

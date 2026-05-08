@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool
 from app.models.database import Base
 import os
 
@@ -12,7 +12,7 @@ def _build_kwargs():
     if is_sqlite:
         return {
             "connect_args": {"check_same_thread": False},
-            "poolclass": StaticPool,
+            "poolclass": NullPool,
         }
     return {
         "pool_size": 10,

@@ -630,10 +630,18 @@ def cancel_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depen
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(404, "Task not found")
-    if task.status == TaskStatus.RUNNING:
-        raise HTTPException(400, "Cannot cancel running task")
 
-    # 更新章节状态：仅当没有其他活跃任务时才重置为 pending
+    if task.status == TaskStatus.RUNNING:
+        # 通知 TaskQueue 取消该任务
+        task_queue.cancel_task(task_id)
+        # 设置章节状态为 pending
+        chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
+        if chapter and chapter.status == "converting":
+            chapter.status = "pending"
+            db.commit()
+        return {"message": "Task cancellation requested"}
+
+    # 非运行中的任务直接删除
     chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
     if chapter and chapter.status in ("queued", "converting"):
         active_tasks = db.query(Task).filter(
@@ -666,11 +674,14 @@ def get_task_progress(task_id: int, db: Session = Depends(get_db), _auth: bool =
         }
 
     # Return status from DB if no in-memory progress
+    elapsed = 0
+    if task.started_at:
+        elapsed = (datetime.utcnow() - task.started_at).total_seconds()
     return {
         "task_id": task_id,
         "status": task.status.value,
         "message": task.status.value,
-        "elapsed": 0,
+        "elapsed": round(elapsed),
         "progress": 0,
     }
 
@@ -1032,10 +1043,12 @@ def get_config(db: Session = Depends(get_db)):
         # 本地模型分段配置
         "local_chunk_size": int(configs.get("local_chunk_size", "200")),
         "local_chunk_gap": float(configs.get("local_chunk_gap", "0.3")),
+        "local_chunk_size_en": int(configs.get("local_chunk_size_en", "120")),
         
         # 在线 API 分段配置
         "online_chunk_size": int(configs.get("online_chunk_size", "800")),
         "online_chunk_gap": float(configs.get("online_chunk_gap", "0.3")),
+        "online_chunk_size_en": int(configs.get("online_chunk_size_en", "400")),
         
         # 目录配置
         "book_dir": configs.get("book_dir", "data/books"),

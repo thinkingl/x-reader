@@ -11,6 +11,7 @@ class TaskStatusEnum(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    CANCELLED = "cancelled"
 
 
 # Book schemas
@@ -193,10 +194,12 @@ class ConfigUpdate(BaseModel):
     # 本地模型分段配置
     local_chunk_size: Optional[int] = None
     local_chunk_gap: Optional[float] = None
+    local_chunk_size_en: Optional[int] = None  # 英文分段大小
     
     # 在线 API 分段配置
     online_chunk_size: Optional[int] = None
     online_chunk_gap: Optional[float] = None
+    online_chunk_size_en: Optional[int] = None  # 英文分段大小
     
     # 目录配置
     book_dir: Optional[str] = None
@@ -227,10 +230,12 @@ class ConfigResponse(BaseModel):
     # 本地模型分段配置
     local_chunk_size: int = 200
     local_chunk_gap: float = 0.3
+    local_chunk_size_en: int = 120  # 英文分段大小（默认较短，英文单词密集）
     
     # 在线 API 分段配置
-    online_chunk_size: int = 2000
+    online_chunk_size: int = 800
     online_chunk_gap: float = 0.3
+    online_chunk_size_en: int = 400  # 英文分段大小
     
     # 目录配置
     book_dir: str = "data/books"
