@@ -7,6 +7,7 @@ from app.services.ebook_parser import EpubParser, sanitize_text, inline_annotati
 
 NANA_EPUB = os.path.join(os.path.dirname(__file__), "data", "nana.epub")
 WORLDS_END_EPUB = os.path.join(os.path.dirname(__file__), "data", "worlds_end.epub")
+XUSANGUAN_EPUB = os.path.join(os.path.dirname(__file__), "data", "xusanguan.epub")
 
 
 class TestSanitizeText:
@@ -254,6 +255,60 @@ class TestUnwrapText:
         ch5 = parsed_worlds_end["chapters"][4]
         assert "电梯" in ch5["text_content"][:200]
         assert len(ch5["text_content"].split('\n')) < 200
+
+
+class TestXuSanguan:
+    """测试《许三观卖血记》EPUB — 正常段落结构，不应被 unwrap"""
+
+    @pytest.fixture
+    def parsed(self):
+        return EpubParser(XUSANGUAN_EPUB).parse()
+
+    def test_total_chapters(self, parsed):
+        assert len(parsed["chapters"]) == 30
+
+    def test_metadata(self, parsed):
+        assert "许三观" in parsed["title"]
+        assert "余华" in parsed["author"]
+
+    def test_no_chapters_are_split(self, parsed):
+        """所有章节都不应标记为 was_split（每章来自独立 HTML 文件）"""
+        for ch in parsed["chapters"]:
+            assert not ch.get("was_split"), (
+                f"Ch{ch['chapter_number']} should NOT be was_split"
+            )
+
+    def test_paragraphs_preserved(self, parsed):
+        """段落结构应保持：每章有多个 <p> 段落，且内容正确"""
+        ch2 = parsed["chapters"][1]  # 第一章
+        text = ch2["text_content"]
+        # 验证关键段落的独立性——不应被合并
+        assert "第一章" in text.split('\n')[0], "First line should be chapter title"
+        assert "许三观是城里丝厂的送茧工" in text
+        assert "他爷爷问：" in text
+        assert "我爹早死啦" in text
+        assert "许三观的四叔正在下面瓜地里浇粪" in text
+        
+        # 检查段落之间存在换行（至少10个段落）
+        paragraphs = [l for l in text.split('\n') if l.strip()]
+        assert len(paragraphs) >= 10, f"Expected >=10 paragraphs, got {len(paragraphs)}"
+        
+        # 验证没有意外的合并：书名不应紧挨着作者
+        ch1 = parsed["chapters"][0]
+        assert "许三观卖血记\n" in ch1["text_content"] or \
+               "许三观卖血记" == ch1["text_content"].split('\n')[0].strip(), \
+               "Title should be on its own line"
+
+    def test_chapter_content_not_empty(self, parsed):
+        for ch in parsed["chapters"]:
+            assert ch["word_count"] > 0, f"Ch{ch['chapter_number']} is empty"
+
+    def test_title_format(self, parsed):
+        """章节标题应为第X章格式（排除首页信息页）"""
+        for ch in parsed["chapters"]:
+            if ch["chapter_number"] >= 2:
+                title = ch["title"]
+                assert "第" in title or "章" in title, f"Ch{ch['chapter_number']}: {title}"
 
 
 @pytest.fixture

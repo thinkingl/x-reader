@@ -104,16 +104,19 @@ class AudioConverter:
 
     def _split_text(self, text: str, chunk_size: int = None, chunk_size_en: int = None) -> List[str]:
         """将长文本按标点符号分段，根据文本语言选择分段大小"""
+        explicit = chunk_size is not None
+        
         if chunk_size is None:
             chunk_size = self.chunk_size
         if chunk_size_en is None:
             chunk_size_en = self.chunk_size_en
         
-        # 检测语言并自动切换分段大小
-        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-        total_chars = sum(1 for c in text if c.isalpha() or '\u4e00' <= c <= '\u9fff')
-        is_chinese = total_chars > 0 and chinese_chars / total_chars > 0.3
-        chunk_size = chunk_size if is_chinese else chunk_size_en
+        # 未显式指定 chunk_size 时，自动检测语言并切换
+        if not explicit:
+            chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+            total_chars = sum(1 for c in text if c.isalpha() or '\u4e00' <= c <= '\u9fff')
+            is_chinese = total_chars > 0 and chinese_chars / total_chars > 0.3
+            chunk_size = chunk_size if is_chinese else chunk_size_en
         
         if len(text) <= chunk_size:
             return [text]
@@ -326,7 +329,7 @@ class AudioConverter:
             raise Exception("MiMo 客户端未配置")
 
         voice_mode = params.get("voice_mode", "auto")
-        chunk_size = params.get("chunk_size", self.online_chunk_size)
+        chunk_size = params.get("chunk_size")
         chunks = self._split_text(text, chunk_size=chunk_size)
         total_chunks = len(chunks)
 
@@ -388,7 +391,7 @@ class AudioConverter:
         self.load_model()
 
         voice_mode = params.get("voice_mode", "auto")
-        chunk_size = params.get("chunk_size", self.chunk_size)
+        chunk_size = params.get("chunk_size")
         chunks = self._split_text(text, chunk_size=chunk_size)
         total_chunks = len(chunks)
 
@@ -452,8 +455,7 @@ class AudioConverter:
         if start_time is None:
             start_time = time.time()
         
-        chunk_size = self.online_chunk_size
-        chunks = self._split_text(text, chunk_size=chunk_size)
+        chunks = self._split_text(text)
         total_chunks = len(chunks)
         
         self._report_progress(f"[在线] 文本分为 {total_chunks} 段，共 {len(text)} 字符", 0)

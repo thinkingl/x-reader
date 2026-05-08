@@ -93,7 +93,6 @@ def unwrap_text(text: str) -> str:
         
         buffer.append(stripped)
         
-        # 当前行以句子结束符结尾 → 这是一个段落边界
         if _SENTENCE_END_RE.search(stripped):
             merged.append(''.join(buffer))
             buffer = []
@@ -105,10 +104,9 @@ def unwrap_text(text: str) -> str:
 
 
 def sanitize_text(text: str) -> str:
-    """清理 TTS 不适用的符号，规范化空白，合并被硬换行截断的句子"""
+    """清理 TTS 不适用的符号，规范化空白"""
     text = _TTS_NONSPEECH_RE.sub(' ', text)
     text = _MULTI_BLANK_RE.sub('\n\n', text)
-    text = unwrap_text(text)
     text = text.strip()
     return text
 
@@ -361,6 +359,7 @@ class EpubParser:
                                     "title": sc["title"],
                                     "text_content": sc["content"],
                                     "word_count": len(sc["content"]),
+                                    "was_split": True,
                                 })
                             continue
 
@@ -400,6 +399,7 @@ class EpubParser:
                                     "title": sc["title"],
                                     "text_content": sc["content"],
                                     "word_count": len(sc["content"]),
+                                    "was_split": True,
                                 })
                             continue
 
@@ -414,7 +414,10 @@ class EpubParser:
 
         # 处理圆圈数字注解内联 + TTS 符号清理
         for ch in chapters:
-            ch["text_content"] = sanitize_text(inline_annotations(ch["text_content"]))
+            ch["text_content"] = inline_annotations(ch["text_content"])
+            if ch.get("was_split"):
+                ch["text_content"] = unwrap_text(ch["text_content"])
+            ch["text_content"] = sanitize_text(ch["text_content"])
             ch["word_count"] = len(ch["text_content"])
 
         return {
@@ -659,7 +662,10 @@ class MobiParser:
 
         # 处理圆圈数字注解内联 + TTS 符号清理
         for ch in chapters:
-            ch["text_content"] = sanitize_text(inline_annotations(ch["text_content"]))
+            ch["text_content"] = inline_annotations(ch["text_content"])
+            if ch.get("was_split"):
+                ch["text_content"] = unwrap_text(ch["text_content"])
+            ch["text_content"] = sanitize_text(ch["text_content"])
             ch["word_count"] = len(ch["text_content"])
 
         return {

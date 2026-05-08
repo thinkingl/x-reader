@@ -2,6 +2,19 @@
 
 x-reader: 电子书 → 有声读物转换系统，基于 OmniVoice TTS
 
+## 工作约束
+
+- **代码修改后必须补充单元测试**：如果修改的功能/修复的 bug 没有对应的单元测试，需要新增测试覆盖。
+- **代码修改后自动运行测试**：修改完成后立即运行 `pytest` 验证，确认全部通过。
+- 测试运行方式：
+  ```bash
+  docker run --rm --entrypoint python3 --network=host \
+    -v $(pwd)/backend:/app/backend:ro \
+    -v $(pwd)/models:/app/models:ro \
+    -w /app/backend 172.16.240.100:5000/x-reader-cuda:latest \
+    -m pytest tests/ -v --tb=short
+  ```
+
 ## 目录结构
 
 - `backend/` — Python FastAPI + SQLite + pytest
@@ -94,6 +107,14 @@ docker-compose down    # 停止服务
 - `start.sh` 自动探测内网缓存服务（Nexus/apt-cacher-ng），可用时使用缓存代理加速
 - `docker build` 传递 `--build-arg USE_INTERNAL_CACHE=true/false` 控制是否使用缓存
 - 数据卷: `./data:/app/backend/data`，模型卷: `./models:/app/models`
+- 环境变量: `PYTHONPATH=/app/backend`, `ALLOW_MODEL_DOWNLOAD=true`
+- **镜像推送到公司 Registry**: `docker push` 因环境代理问题不可用，使用导出方式：
+  ```bash
+  docker save 172.16.240.100:5000/x-reader-cuda:latest -o docker/x-reader-cuda.tar
+  # 然后通过 scp/rsync/USB 将 tar 文件传输到内网机器，再:
+  docker load -i x-reader-cuda.tar
+  docker push 172.16.240.100:5000/x-reader-cuda:latest
+  ```
 - 环境变量: `PYTHONPATH=/app/backend`, `ALLOW_MODEL_DOWNLOAD=true`
 
 ## 当前状态
