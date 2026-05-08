@@ -279,16 +279,13 @@ function BookDetail() {
   const handleDownloadBook = () => {
     setDownloadingZip(true);
     const url = `/api/audio/${id}/zip`;
-    // 使用隐藏iframe触发下载
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = url;
-    document.body.appendChild(iframe);
-    // 5秒后移除iframe并清除状态
-    setTimeout(() => {
-      document.body.removeChild(iframe);
-      setDownloadingZip(false);
-    }, 5000);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => setDownloadingZip(false), 3000);
   };
 
   const handleDeleteChapter = async (chapter) => {

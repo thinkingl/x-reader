@@ -104,19 +104,16 @@ class AudioConverter:
 
     def _split_text(self, text: str, chunk_size: int = None, chunk_size_en: int = None) -> List[str]:
         """将长文本按标点符号分段，根据文本语言选择分段大小"""
-        explicit_size = chunk_size is not None
-        
         if chunk_size is None:
             chunk_size = self.chunk_size
         if chunk_size_en is None:
             chunk_size_en = self.chunk_size_en
         
-        # 检测语言并自动切换分段大小（仅在未显式指定 chunk_size 时）
-        if not explicit_size:
-            chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-            total_chars = sum(1 for c in text if c.isalpha() or '\u4e00' <= c <= '\u9fff')
-            is_chinese = total_chars > 0 and chinese_chars / total_chars > 0.3
-            chunk_size = chunk_size if is_chinese else chunk_size_en
+        # 检测语言并自动切换分段大小
+        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        total_chars = sum(1 for c in text if c.isalpha() or '\u4e00' <= c <= '\u9fff')
+        is_chinese = total_chars > 0 and chinese_chars / total_chars > 0.3
+        chunk_size = chunk_size if is_chinese else chunk_size_en
         
         if len(text) <= chunk_size:
             return [text]
