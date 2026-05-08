@@ -34,6 +34,7 @@ class AudioConverter:
         self.mimo_client = None
         self.online_chunk_size = 800  # 在线 TTS 分段大小
         self.tts_timeout = 120  # TTS 单次请求超时秒数
+        self._model_lock = threading.Lock()  # 模型加载互斥锁
 
     def set_progress_callback(self, callback: Callable):
         self.progress_callback = callback
@@ -80,17 +81,22 @@ class AudioConverter:
                         f"请先下载模型到 {self.model_path}，或设置环境变量 ALLOW_MODEL_DOWNLOAD=true 允许在线下载"
                     )
 
-            from omnivoice import OmniVoice
-            dtype = torch.float16 if self.precision == "float16" else torch.float32
-            self._report_progress(f"正在加载模型: {self.model_path} (设备: {self.device})")
-            self.model = OmniVoice.from_pretrained(
-                self.model_path,
-                device_map=self.device,
-                dtype=dtype,
-                load_asr=True,
-                asr_model_name=self.asr_model_path,
-            )
-            self._report_progress(f"模型加载完成 (设备: {self.device})")
+            with self._model_lock:
+                # 双重检查：可能其他线程已经加载完了
+                if self.model is not None:
+                    return
+
+                from omnivoice import OmniVoice
+                dtype = torch.float16 if self.precision == "float16" else torch.float32
+                self._report_progress(f"正在加载模型: {self.model_path} (设备: {self.device})")
+                self.model = OmniVoice.from_pretrained(
+                    self.model_path,
+                    device_map=self.device,
+                    dtype=dtype,
+                    load_asr=True,
+                    asr_model_name=self.asr_model_path,
+                )
+                self._report_progress(f"模型加载完成 (设备: {self.device})")
 
     def _split_text(self, text: str, chunk_size: int = None) -> List[str]:
         """将长文本按标点符号分段"""

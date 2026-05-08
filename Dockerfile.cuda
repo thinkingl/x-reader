@@ -50,6 +50,7 @@ RUN pip3 install \
     pytest>=7.4.0 \
     httpx>=0.25.0 \
     PyJWT>=2.8.0 \
+    mobi>=0.4.0 \
     omnivoice
 
 # Copy frontend package.json and install dependencies

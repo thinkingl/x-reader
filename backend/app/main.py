@@ -186,6 +186,15 @@ def startup():
     # 配置在线 TTS
     task_queue.configure_online_tts()
 
+    # 从配置读取并发数并更新（必须在任务提交前）
+    concurrency = int(configs.get("concurrency", "1"))
+    if concurrency != task_queue.max_workers:
+        task_queue.max_workers = concurrency
+        old_executor = task_queue.executor
+        task_queue.executor = ThreadPoolExecutor(max_workers=concurrency)
+        old_executor.shutdown(wait=False)
+        logger.info(f"并发数设置为: {concurrency}")
+
     # 3. 重新提交所有 QUEUED + PENDING 任务（必须在 converter 初始化后）
     db = next(get_db())
     resubmit_tasks = db.query(Task).filter(
@@ -196,15 +205,6 @@ def startup():
     if resubmit_tasks:
         logger.info(f"已重新提交 {len(resubmit_tasks)} 个任务")
     db.close()
-
-    # 从配置读取并发数并更新
-    concurrency = int(configs.get("concurrency", "1"))
-    if concurrency != task_queue.max_workers:
-        task_queue.max_workers = concurrency
-        old_executor = task_queue.executor
-        task_queue.executor = ThreadPoolExecutor(max_workers=concurrency)
-        old_executor.shutdown(wait=False)
-        logger.info(f"并发数设置为: {concurrency}")
 
 
 @app.on_event("shutdown")
