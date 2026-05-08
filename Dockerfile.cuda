@@ -1,43 +1,68 @@
 FROM cuda-ubuntu:22.04-dev
 
-# Install system dependencies (use HTTP proxy for apt)
-ENV http_proxy=http://172.16.195.148:8118
-ENV https_proxy=http://172.16.195.148:8118
+# Build-time proxy configuration (pass via: --build-arg USE_INTERNAL_CACHE=true)
+ARG USE_INTERNAL_CACHE=false
+ARG HTTP_PROXY_HOST=172.16.195.148
+ARG HTTP_PROXY_PORT=8118
+ARG NEXUS_HOST=172.16.240.100
+ARG NEXUS_PORT=8081
+ARG APT_CACHE_HOST=172.16.240.100
+ARG APT_CACHE_PORT=3142
+
+# ---------- APT ----------
+RUN if [ "$USE_INTERNAL_CACHE" = "true" ]; then \
+      echo "Using internal apt-cacher-ng: http://${APT_CACHE_HOST}:${APT_CACHE_PORT}"; \
+      echo "Acquire::http::Proxy \"http://${APT_CACHE_HOST}:${APT_CACHE_PORT}\";" > /etc/apt/apt.conf.d/02proxy; \
+      export http_proxy=""; export https_proxy=""; \
+    else \
+      echo "Using direct network (no internal cache)"; \
+    fi
+
 RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-dev \
     curl \
     git \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-ENV http_proxy=
-ENV https_proxy=
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/apt/apt.conf.d/02proxy
 
-# Install Node.js 20.x
-ENV http_proxy=http://172.16.195.148:8118
-ENV https_proxy=http://172.16.195.148:8118
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+# ---------- Node.js 20.x ----------
+RUN if [ "$USE_INTERNAL_CACHE" = "true" ]; then \
+      export http_proxy="http://${HTTP_PROXY_HOST}:${HTTP_PROXY_PORT}"; \
+      export https_proxy="http://${HTTP_PROXY_HOST}:${HTTP_PROXY_PORT}"; \
+    else \
+      export http_proxy=""; export https_proxy=""; \
+    fi; \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
-ENV http_proxy=
-ENV https_proxy=
 
 WORKDIR /app
 
-# pip: use Nexus proxies
+# ---------- pip ----------
 RUN mkdir -p /root/.config/pip && \
-    printf '[global]\nindex-url = http://172.16.240.100:8081/repository/pypi-proxy/simple/\ntrusted-host = 172.16.240.100\ntimeout = 600\n' > /root/.config/pip/pip.conf
+    if [ "$USE_INTERNAL_CACHE" = "true" ]; then \
+      printf '[global]\nindex-url = http://%s:%s/repository/pypi-proxy/simple/\ntrusted-host = %s\ntimeout = 600\n' \
+        "$NEXUS_HOST" "$NEXUS_PORT" "$NEXUS_HOST" > /root/.config/pip/pip.conf; \
+    else \
+      printf '[global]\nindex-url = http://mirrors.aliyun.com/pypi/simple/\ntrusted-host = mirrors.aliyun.com\ntimeout = 600\n' > /root/.config/pip/pip.conf; \
+    fi
 
-# Copy backend requirements
 COPY backend/requirements.txt /app/backend/requirements.txt
 
-# Install torch/torchaudio first (large packages, need long timeout, from pytorch-proxy)
-RUN pip3 install --no-deps \
-    --extra-index-url http://172.16.240.100:8081/repository/pytorch-proxy/simple/ \
-    torch==2.4.1+cu124 \
-    torchaudio==2.4.1+cu124
+# torch/torchaudio (PyTorch CUDA wheels)
+RUN if [ "$USE_INTERNAL_CACHE" = "true" ]; then \
+      pip3 install --no-deps \
+        --extra-index-url "http://${NEXUS_HOST}:${NEXUS_PORT}/repository/pytorch-proxy/simple/" \
+        torch==2.4.1+cu124 torchaudio==2.4.1+cu124; \
+    else \
+      pip3 install --no-deps \
+        --index-url https://download.pytorch.org/whl/cu124 \
+        torch==2.4.1+cu124 torchaudio==2.4.1+cu124; \
+    fi
 
-# Install remaining Python dependencies (from pypi-proxy)
+# Remaining Python deps
 RUN pip3 install \
     fastapi>=0.104.0 \
     uvicorn>=0.24.0 \
@@ -53,23 +78,22 @@ RUN pip3 install \
     mobi>=0.4.0 \
     omnivoice
 
-# Copy frontend package.json and install dependencies
+# ---------- npm ----------
 COPY frontend/package.json /app/frontend/package.json
-RUN cd /app/frontend && npm install
+RUN if [ "$USE_INTERNAL_CACHE" = "true" ]; then \
+      cd /app/frontend && npm config set registry "http://${NEXUS_HOST}:${NEXUS_PORT}/repository/npm-proxy/" && npm install; \
+    else \
+      cd /app/frontend && npm config set registry "http://registry.npmmirror.com" && npm install; \
+    fi
 
-# Copy application code
 COPY . /app
 
-# Create data directories
 RUN mkdir -p /app/data/books /app/data/audio /app/data/reference
 
-# Set environment variables
 ENV PYTHONPATH=/app/backend
 
-# Expose ports
 EXPOSE 8000 5173
 
-# Make entrypoint executable
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

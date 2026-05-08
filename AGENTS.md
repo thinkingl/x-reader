@@ -85,13 +85,16 @@ cd android
 ## Docker
 
 ```bash
+./docker/start.sh    # 一键构建+启动，自动探测内网缓存
 docker-compose up -d   # 启动服务 (端口 8000 + 5173)
 docker-compose down    # 停止服务
 ```
 
-- 使用 `Dockerfile` 构建，支持 CUDA (`Dockerfile.cuda`)
-- 数据卷: `./data:/app/data`
-- 环境变量: `PYTHONPATH=/app/backend`
+- 使用 `Dockerfile.cuda` 构建，支持 CUDA
+- `start.sh` 自动探测内网缓存服务（Nexus/apt-cacher-ng），可用时使用缓存代理加速
+- `docker build` 传递 `--build-arg USE_INTERNAL_CACHE=true/false` 控制是否使用缓存
+- 数据卷: `./data:/app/backend/data`，模型卷: `./models:/app/models`
+- 环境变量: `PYTHONPATH=/app/backend`, `ALLOW_MODEL_DOWNLOAD=true`
 
 ## 当前状态
 
