@@ -43,6 +43,7 @@ $SUDO docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 echo "Starting $CONTAINER_NAME..."
 $SUDO docker run -d --name "$CONTAINER_NAME" \
+  --restart unless-stopped \
   --gpus all \
   -p 5173:5173 -p 8080:8000 \
   -v "$PROJECT_DIR/data:/app/backend/data" \
