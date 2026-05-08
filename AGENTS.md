@@ -105,7 +105,7 @@ docker-compose down    # 停止服务
 - 认证功能：Challenge-Response + JWT Token
 - Docker 支持 (CUDA + GPU passthrough)
 - 在线 TTS 支持：小米 MiMo V2.5 API，支持在线优先+失败回退
-- 任务状态管理：pending → queued → running → completed/failed
+- 任务状态管理：pending → queued → running → completed/failed/cancelled
 - 任务列表后端分页，章节内容查看，播放缓存修复
 - Android Kotlin/Jetpack Compose 客户端（自适应布局，支持手机和平板）
 - EPUB 章节目录文本级拆分（支持第X章/中文数字/特殊标记）
@@ -114,22 +114,26 @@ docker-compose down    # 停止服务
 - EPUB 硬换行截断修复 (`unwrap_text`)：合并不以句号结尾的断行
 - 章节列表分页 API (`ChapterListItem`/`ChapterListResponse`，排除 `text_content`)
 - 转换失败退避重试：最多 3 次，间隔 1s/2s/3s
-- SQLite 连接池优化（`StaticPool` 避免连接池耗尽）
+- SQLite 连接池优化（`NullPool` 多线程安全）
 - TTS 超时配置 (`tts_timeout`，默认 120s，前端可配置)
-- 英文分句支持 + 超长句次级标点拆分
+- 英文分句支持 + 超长句次级标点拆分（优先级：逗号 > 冒号 > 空格）
+- 中/英文分段大小分别配置 (`local_chunk_size_en`/`online_chunk_size_en`)
+- 自动语言检测（CJK 字符占比 >30% 用中文限，否则英文限）
 - 容器优雅重启：shutdown 保存任务状态，startup 自动恢复
-- 转换任务的语音预设名称记录与展示
+- 转换任务的语音预设名称记录与展示（Chapter.voice_preset_name）
 - 任务列表按状态筛选
+- 任务取消（RUNNING/CHANNING 任务可取消，converter 分段间检测取消标志）
+- 并发模型加载保护 (`threading.Lock` 防止 GPU OOM)
+- 前端 Table 水平滚动 + 列宽优化 + 增量更新（仅变动的行重渲染）
+- 前端智能轮询（仅 pending/queued/converting 时刷新）
+- 日志时间戳格式 (`logging.basicConfig`)
+- 前端时长显示格式（x时x分x秒）
 - 测试数据：`tests/data/nana.epub` + `tests/data/worlds_end.epub`
-- 单元测试：ebook_parser (10), nana_epub (12), tts_sanitize (30), split_text (19)
+- 单元测试：ebook_parser (10), nana_epub (12), tts_sanitize (30), split_text (34)
 
 ### 待修复 / 待优化
 - PDF 按目录书签分章
 - 上传文件大小限制 / 进度显示
-- 转换任务暂停/恢复
 - 语音预设导入/导出 (JSON 格式)
-- MOBI 格式支持（`mobi` 包需在 Docker 镜像构建时安装，目前手动安装于运行容器）
-- 章节列表增量更新 + 智能轮询（仅转换中刷新）
-- 前端表格列宽自适应 + 水平滚动
-- 日志时间戳格式
-- 前端时长显示格式（x时x分x秒）
+- MOBI 格式支持（`mobi` 包需在 Docker 镜像构建时安装，目前 Nexus 下载慢）
+- 章节标题中的《》书名号清理
