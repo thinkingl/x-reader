@@ -13,9 +13,7 @@ ARG APT_CACHE_PORT=3142
 RUN if [ "$USE_INTERNAL_CACHE" = "true" ]; then \
       echo "Using internal apt-cacher-ng: http://${APT_CACHE_HOST}:${APT_CACHE_PORT}"; \
       echo "Acquire::http::Proxy \"http://${APT_CACHE_HOST}:${APT_CACHE_PORT}\";" > /etc/apt/apt.conf.d/02proxy; \
-      export http_proxy=""; export https_proxy=""; \
-    else \
-      echo "Using direct network (no internal cache)"; \
+      sed -i 's|https://mirrors.aliyun.com|http://archive.ubuntu.com|g' /etc/apt/sources.list; \
     fi
 
 RUN apt-get update && apt-get install -y \
