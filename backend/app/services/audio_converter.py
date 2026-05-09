@@ -1,8 +1,5 @@
 import os
 import logging
-import torch
-import torchaudio
-import numpy as np
 import time
 import re
 import threading
@@ -20,7 +17,7 @@ class AudioConverter:
                  asr_model_path: str = "openai/whisper-large-v3-turbo",
                  allow_download: bool = False):
         self.model_path = model_path
-        self.device = self._get_device(device)
+        self._device_str = device
         self.precision = precision
         self.asr_model_path = asr_model_path
         self.allow_download = allow_download
@@ -67,6 +64,7 @@ class AudioConverter:
         logger.info(message)
 
     def _get_device(self, device: str) -> str:
+        import torch
         if device == "auto":
             if torch.cuda.is_available():
                 return "cuda"
@@ -77,6 +75,8 @@ class AudioConverter:
 
     def load_model(self):
         if self.model is None:
+            self.device = self._get_device(self._device_str)
+            
             if not self.allow_download:
                 model_file = os.path.join(self.model_path, "model.safetensors")
                 if not os.path.isfile(model_file):
@@ -86,10 +86,13 @@ class AudioConverter:
                     )
 
             with self._model_lock:
-                # 双重检查：可能其他线程已经加载完了
                 if self.model is not None:
                     return
 
+                # 延迟导入（仅首次加载模型时触发，避免启动时消耗CUDA内存）
+                global torch, torchaudio, np
+                import torch, torchaudio, numpy as np
+                
                 from omnivoice import OmniVoice
                 dtype = torch.float16 if self.precision == "float16" else torch.float32
                 self._report_progress(f"正在加载模型: {self.model_path} (设备: {self.device})")
@@ -325,6 +328,7 @@ class AudioConverter:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """在线 MiMo TTS 转换"""
+        import torchaudio
         if not self.mimo_client:
             raise Exception("MiMo 客户端未配置")
 
@@ -388,6 +392,7 @@ class AudioConverter:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """本地 OmniVoice TTS 转换"""
+        import torchaudio
         self.load_model()
 
         voice_mode = params.get("voice_mode", "auto")
