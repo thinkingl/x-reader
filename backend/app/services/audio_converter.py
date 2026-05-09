@@ -303,6 +303,7 @@ class AudioConverter:
             get_completed_count,
             iter_completed,
             delete as cp_delete,
+            exists as cp_exists,
         )
         import io
 
