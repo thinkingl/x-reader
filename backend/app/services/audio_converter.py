@@ -313,8 +313,8 @@ class AudioConverter:
         params = preset or {}
         engine = params.get("engine", "local_omnivoice")
 
-        # 1. 切分 chunk
-        chunk_size = params.get("chunk_size", self.online_chunk_size if engine == "online_mimo" else self.chunk_size)
+        # 1. 切分 chunk（不显式传 size 以便触发语言检测）
+        chunk_size = params.get("chunk_size")
         chunks = self._split_text(text, chunk_size=chunk_size)
         total = len(chunks)
 
