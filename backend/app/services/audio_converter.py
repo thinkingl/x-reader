@@ -373,20 +373,24 @@ class AudioConverter:
         import torchaudio, torch
 
         sample_rate = 24000 if engine == "online_mimo" else self.model.sampling_rate
-        merged = None
-        chunks_written = 0
 
+        # 收集所有张量后一次性拼接，O(N) 优于增量 O(N²)
+        tensors = []
+        total = get_completed_count(task_id)
         for idx, (_, audio_bytes) in enumerate(iter_completed(task_id)):
             buffer = io.BytesIO(audio_bytes)
             tensor, sr = torchaudio.load(buffer)
-            if chunks_written == 0:
-                merged = tensor
-            else:
-                silence = torch.zeros(1, int(0.3 * sample_rate))
-                prev = merged
-                merged = torch.cat([prev, silence, tensor], dim=1)
-                del prev
-            chunks_written += 1
+            tensors.append(tensor)
+
+        if tensors:
+            parts = []
+            for i, t in enumerate(tensors):
+                if i > 0:
+                    parts.append(torch.zeros(1, int(0.3 * sample_rate)))
+                parts.append(t)
+            merged = torch.cat(parts, dim=1)
+        else:
+            merged = None
 
         if merged is not None:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
