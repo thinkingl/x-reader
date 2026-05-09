@@ -34,10 +34,25 @@ else
     echo "OmniVoice model found."
 fi
 
-# Start backend
+# Start backend (auto-restart on crash, exit container after 5 consecutive failures)
 cd /app/backend
 echo "Starting backend on port 8000..."
-PYTHONPATH=/app/backend uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+RETRY=0
+while true; do
+    PYTHONPATH=/app/backend uvicorn app.main:app --host 0.0.0.0 --port 8000
+    RETRY=$((RETRY + 1))
+    if [ $RETRY -ge 5 ]; then
+        echo "Backend failed 5 times, exiting container..."
+        exit 1
+    fi
+    echo "Backend exited, restarting in 3s (attempt $RETRY/5)..."
+    sleep 3
+    # 如果正常运行超过30秒，重置重试计数
+    if [ $RETRY -gt 0 ]; then
+        sleep 30
+        RETRY=0
+    fi
+done &
 BACKEND_PID=$!
 
 sleep 3
@@ -49,4 +64,4 @@ npx vite --host 0.0.0.0 --force &
 FRONTEND_PID=$!
 
 echo "Services: frontend=:5173 backend=:8000"
-wait $BACKEND_PID $FRONTEND_PID
+wait $FRONTEND_PID
