@@ -362,13 +362,16 @@ class AudioConverter:
             progress = ((i + 1) / total_chunks) * 100
             self._report_progress(f"[MiMo] 第 {i+1}/{total_chunks} 段完成", progress)
 
-        # 合并音频
+        # 合并音频（增量释放旧张量，防止内存积累）
         self._report_progress("正在合并音频...", 95)
         if len(audio_chunks) > 1:
             silence = torch.zeros(1, int(0.3 * sample_rate))
             merged = audio_chunks[0]
             for t in audio_chunks[1:]:
-                merged = torch.cat([merged, silence, t], dim=1)
+                prev = merged
+                merged = torch.cat([prev, silence, t], dim=1)
+                del prev  # 立即释放旧引用
+            audio_chunks.clear()
         else:
             merged = audio_chunks[0]
 
@@ -428,7 +431,10 @@ class AudioConverter:
             silence = torch.zeros(1, int(0.3 * self.model.sampling_rate))
             merged = audio_tensors[0]
             for t in audio_tensors[1:]:
-                merged = torch.cat([merged, silence, t], dim=1)
+                prev = merged
+                merged = torch.cat([prev, silence, t], dim=1)
+                del prev
+            audio_tensors.clear()
         else:
             merged = audio_tensors[0]
 
@@ -503,7 +509,10 @@ class AudioConverter:
             silence = torch.zeros(1, int(silence_duration * sample_rate))
             merged_audio = audio_chunks[0]
             for tensor in audio_chunks[1:]:
-                merged_audio = torch.cat([merged_audio, silence, tensor], dim=1)
+                prev = merged_audio
+                merged_audio = torch.cat([prev, silence, tensor], dim=1)
+                del prev
+            audio_chunks.clear()
         else:
             merged_audio = audio_chunks[0]
         
@@ -600,7 +609,10 @@ class AudioConverter:
             silence = torch.zeros(1, int(silence_duration * self.model.sampling_rate))
             merged_audio = audio_tensors[0]
             for tensor in audio_tensors[1:]:
-                merged_audio = torch.cat([merged_audio, silence, tensor], dim=1)
+                prev = merged_audio
+                merged_audio = torch.cat([prev, silence, tensor], dim=1)
+                del prev
+            audio_tensors.clear()
         else:
             merged_audio = audio_tensors[0]
         
