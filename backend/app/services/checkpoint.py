@@ -6,7 +6,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-CHECKPOINT_DIR = "data/checkpoints"
+CHECKPOINT_DIR = os.environ.get("CHECKPOINT_DIR", "data/checkpoints")
+
+
+def set_dir(path: str):
+    """设置 checkpoint 目录（用于测试）"""
+    global CHECKPOINT_DIR
+    CHECKPOINT_DIR = path
 
 
 def _db_path(task_id: int) -> str:
