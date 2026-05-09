@@ -1,10 +1,10 @@
-"""哈利·波特 MOBI 解析测试：验证 mobi 格式支持及章节拆分"""
+"""Harry Potter MOBI parsing test: verify mobi format support and chapter splitting"""
 
 import os
 import pytest
 from app.services.ebook_parser import get_parser
 
-TEST_MOBI = os.path.join(os.path.dirname(__file__), "data", "哈利·波特.mobi")
+TEST_MOBI = os.path.join(os.path.dirname(__file__), "data", "harry_potter.mobi")
 
 
 class TestHarryPotterMobi:
@@ -20,8 +20,8 @@ class TestHarryPotterMobi:
         assert parsed["format"] == "mobi"
 
     def test_title(self, parsed):
-        """书名应包含哈利·波特"""
-        assert "哈利·波特" in parsed["title"]
+        """Title should be the filename stem"""
+        assert parsed["title"] == "harry_potter"
 
     def test_total_chapters(self, parsed):
         """哈利波特全集包含 7 部书，共 200 章"""

@@ -508,6 +508,13 @@ class TxtParser:
 
         for line in lines:
             match = re.match(pattern, line, re.MULTILINE)
+            if not match:
+                stripped = line.strip()
+                if stripped and re.fullmatch(r"[A-Z ]{3,}", stripped):
+                    match = type("M", (), {"group": lambda self, n: stripped})()
+                elif stripped and re.match(r"\d+[．.]\s*[A-Z]", stripped):
+                    title = re.sub(r"^\d+[．.]\s*", "", stripped)
+                    match = type("M", (), {"group": lambda self, n, t=title: t})()
             if match:
                 if current_chapter or current_text:
                     text = "\n".join(current_text).strip()

@@ -57,3 +57,50 @@ def test_txt_parser_chapter_detection():
         for ch in result["chapters"]:
             assert ch["word_count"] > 0
         os.unlink(f.name)
+
+
+def test_txt_parser_uppercase_headers():
+    """Test uppercase chapter headers like PROLOGUE, character names (Game of Thrones style)"""
+    content = """PROLOGUE
+
+We should start back, Gared urged as the woods began to grow dark.
+
+EDDARD
+
+He dreamt an old dream, of three knights in white cloaks.
+
+CATELYN
+
+Catelyn had never liked this godswood.
+
+JON
+
+Jon found it hard to look away from him.
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+        f.write(content)
+        f.flush()
+        parser = TxtParser(f.name)
+        result = parser.parse()
+        assert len(result["chapters"]) == 4
+        assert result["chapters"][0]["title"] == "PROLOGUE"
+        assert result["chapters"][1]["title"] == "EDDARD"
+        assert result["chapters"][2]["title"] == "CATELYN"
+        assert result["chapters"][3]["title"] == "JON"
+        assert "We should start back" in result["chapters"][0]["text_content"]
+        assert "dreamt an old dream" in result["chapters"][1]["text_content"]
+        os.unlink(f.name)
+
+
+def test_txt_parser_uppercase_with_fullwidth_spaces():
+    """Test uppercase headers with fullwidth spaces (common in Chinese-prefixed TXT files)"""
+    content = "\u3000\u3000PROLOGUE\n\n\u3000\u3000We should start back.\n\n\u3000\u3000EDDARD\n\n\u3000\u3000He dreamt an old dream.\n"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+        f.write(content)
+        f.flush()
+        parser = TxtParser(f.name)
+        result = parser.parse()
+        assert len(result["chapters"]) == 2
+        assert result["chapters"][0]["title"] == "PROLOGUE"
+        assert result["chapters"][1]["title"] == "EDDARD"
+        os.unlink(f.name)

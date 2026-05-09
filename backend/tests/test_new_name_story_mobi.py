@@ -1,10 +1,10 @@
-"""新名字的故事 MOBI 解析测试：验证 -\d- 格式章节标题支持"""
+"""My Brilliant Friend MOBI parsing test: verify -\\d- format chapter title support"""
 
 import os
 import pytest
 from app.services.ebook_parser import get_parser
 
-TEST_MOBI = os.path.join(os.path.dirname(__file__), "data", "新名字的故事-埃莱娜费兰特.mobi")
+TEST_MOBI = os.path.join(os.path.dirname(__file__), "data", "new_name_story.mobi")
 
 
 class TestNewNameStoryMobi:
@@ -19,7 +19,7 @@ class TestNewNameStoryMobi:
         assert parsed["format"] == "mobi"
 
     def test_title(self, parsed):
-        assert "新名字的故事" in parsed["title"]
+        assert parsed["title"] == "new_name_story"
 
     def test_total_chapters(self, parsed):
         """应有 127 章"""
