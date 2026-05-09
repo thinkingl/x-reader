@@ -318,7 +318,11 @@ class AudioConverter:
         chunks = self._split_text(text, chunk_size=chunk_size)
         total = len(chunks)
 
-        # 2. 创建或加载 checkpoint DB
+        # 2. 创建或加载 checkpoint DB（chunk 数变化则重建）
+        existing_count = get_completed_count(task_id) + max(0, get_pending_count(task_id))
+        if cp_exists(task_id) and existing_count != total:
+            self._report_progress(f"分段数变化({existing_count}→{total})，重建 checkpoint", 0)
+            cp_delete(task_id)
         if not cp_create(task_id, chunks):
             raise Exception("无法创建 checkpoint 数据库")
 
