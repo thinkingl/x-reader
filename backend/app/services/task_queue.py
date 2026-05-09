@@ -208,7 +208,8 @@ class TaskQueue:
                     raise Exception("任务已取消")
                     
                 try:
-                    result = self.converter.convert_chapter(
+                    result = self.converter.convert_chapter_with_checkpoint(
+                        task_id=task_id,
                         text=chapter.text_content,
                         output_path=output_path,
                         preset=preset_params,

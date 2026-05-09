@@ -140,6 +140,16 @@ def startup():
     # 迁移旧 VoicePreset 数据（在 db.close() 之前）
     import json
     migrated = 0
+    ...
+    # 清理孤立的 checkpoint DB（无对应活跃任务）
+    try:
+        from app.services.checkpoint import cleanup_orphans
+        active_ids = set()
+        for t in db.query(Task).filter(Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING])).all():
+            active_ids.add(t.id)
+        cleanup_orphans(active_ids)
+    except Exception as e:
+        logger.warning(f"Checkpoint cleanup failed: {e}")
     presets = db.query(VoicePreset).filter(VoicePreset.engine == None).all()
     for p in presets:
         if p.engine is not None:
@@ -634,6 +644,9 @@ def cancel_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depen
     if task.status == TaskStatus.RUNNING:
         # 通知 TaskQueue 取消该任务
         task_queue.cancel_task(task_id)
+        # 清理 checkpoint DB
+        from app.services.checkpoint import delete as cp_delete
+        cp_delete(task_id)
         # 设置章节状态为 pending
         chapter = db.query(Chapter).filter(Chapter.id == task.chapter_id).first()
         if chapter and chapter.status == "converting":
@@ -651,6 +664,10 @@ def cancel_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depen
         ).count()
         if active_tasks == 0:
             chapter.status = "pending"
+
+    # 清理 checkpoint DB
+    from app.services.checkpoint import delete as cp_delete
+    cp_delete(task_id)
 
     db.delete(task)
     db.commit()

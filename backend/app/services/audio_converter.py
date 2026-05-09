@@ -286,6 +286,130 @@ class AudioConverter:
         
         return audio
 
+    def convert_chapter_with_checkpoint(
+        self,
+        task_id: int,
+        text: str,
+        output_path: str,
+        preset: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Callable] = None,
+    ) -> Dict[str, Any]:
+        """带断点续传的转换：chunk 级缓存到 SQLite，避免内存累积"""
+        from app.services.checkpoint import (
+            create as cp_create,
+            save_chunk,
+            get_pending_count,
+            get_completed_count,
+            iter_completed,
+            delete as cp_delete,
+        )
+        import io
+
+        cb = progress_callback or self.progress_callback
+        self._local.progress_callback = cb
+        start_time = time.time()
+
+        params = preset or {}
+        engine = params.get("engine", "local_omnivoice")
+
+        # 1. 切分 chunk
+        chunk_size = params.get("chunk_size", self.online_chunk_size if engine == "online_mimo" else self.chunk_size)
+        chunks = self._split_text(text, chunk_size=chunk_size)
+        total = len(chunks)
+
+        # 2. 创建或加载 checkpoint DB
+        if not cp_create(task_id, chunks):
+            raise Exception("无法创建 checkpoint 数据库")
+
+        pending = get_pending_count(task_id)
+        completed = get_completed_count(task_id)
+        if completed > 0:
+            self._report_progress(f"从断点恢复：已完成 {completed}/{total} 段，还剩 {pending} 段", 0)
+
+        # 3. 转换未完成的 chunk
+        for i, chunk_text in enumerate(chunks):
+            # 跳过已完成的
+            if completed > 0 and i < get_completed_count(task_id):
+                continue
+
+            progress = (i / total) * 100
+            self._report_progress(f"[Checkpoint] 转换第 {i+1}/{total} 段", progress)
+
+            if engine == "online_mimo":
+                if not self.mimo_client:
+                    raise Exception("MiMo 客户端未配置")
+                audio_bytes = self.mimo_client.synthesize(
+                    text=chunk_text,
+                    voice_mode=params.get("voice_mode", "auto"),
+                    voice_id=params.get("voice_id", "冰糖"),
+                    instruct=params.get("instruct"),
+                    ref_audio_path=params.get("ref_audio_path"),
+                    audio_format="wav",
+                    speed=params.get("speed", 1.0),
+                )
+            else:
+                self.load_model()
+                tensor = self._generate_single_chunk(
+                    text=chunk_text,
+                    voice_mode=params.get("voice_mode", "auto"),
+                    instruct=params.get("instruct"),
+                    ref_audio_path=params.get("ref_audio_path"),
+                    ref_text=params.get("ref_text"),
+                    language=params.get("language"),
+                    num_step=params.get("num_step", 32),
+                    guidance_scale=params.get("guidance_scale", 2.0),
+                    speed=params.get("speed", 1.0),
+                )
+                import torchaudio
+                buffer = io.BytesIO()
+                torchaudio.save(buffer, tensor, self.model.sampling_rate, format="wav")
+                audio_bytes = buffer.getvalue()
+
+            save_chunk(task_id, i, audio_bytes)
+
+        # 4. 合并所有 chunk 并写入最终文件
+        self._report_progress("正在合并音频...", 95)
+        import torchaudio, torch
+
+        sample_rate = 24000 if engine == "online_mimo" else self.model.sampling_rate
+        merged = None
+        chunks_written = 0
+
+        for idx, (_, audio_bytes) in enumerate(iter_completed(task_id)):
+            buffer = io.BytesIO(audio_bytes)
+            tensor, sr = torchaudio.load(buffer)
+            if chunks_written == 0:
+                merged = tensor
+            else:
+                silence = torch.zeros(1, int(0.3 * sample_rate))
+                prev = merged
+                merged = torch.cat([prev, silence, tensor], dim=1)
+                del prev
+            chunks_written += 1
+
+        if merged is not None:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            torchaudio.save(output_path, merged, sample_rate)
+
+        duration = merged.shape[-1] / sample_rate if merged is not None else 0
+
+        # 5. 清理 checkpoint DB
+        cp_delete(task_id)
+
+        elapsed = time.time() - start_time
+        self._report_progress(f"转换完成: {duration:.1f}s 音频, 耗时 {elapsed:.1f}s", 100)
+
+        if metadata and os.path.exists(output_path):
+            self._write_metadata(output_path, metadata)
+
+        return {
+            "audio_path": output_path,
+            "duration": duration,
+            "sample_rate": sample_rate,
+            "engine": engine,
+        }
+
     def convert_chapter(
         self,
         text: str,
