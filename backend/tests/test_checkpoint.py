@@ -163,6 +163,8 @@ class TestCheckpointConverter:
         conv.progress_callback = None
         conv.chunk_size = 200
         conv.chunk_size_en = 200
+        conv.audio_format = "wav"
+        conv.audio_bitrate = "64k"
         conv._local = type('obj', (), {})()
         conv._local.progress_callback = None
         return conv

@@ -3,6 +3,8 @@ import logging
 import time
 import re
 import threading
+import subprocess
+import shutil
 import io
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, List
@@ -39,6 +41,10 @@ class AudioConverter:
         self.tts_timeout = 120  # TTS 单次请求超时秒数
         self._model_lock = threading.Lock()  # 模型加载互斥锁
 
+        # 输出格式配置
+        self.audio_format = "wav"
+        self.audio_bitrate = "64k"
+
     def set_progress_callback(self, callback: Callable):
         self.progress_callback = callback
     
@@ -58,6 +64,56 @@ class AudioConverter:
             self.mimo_client = None
             if tts_mode in ("online", "online_first"):
                 logger.warning("在线 TTS 模式但未提供 API Key")
+
+    def _convert_to_target_format(self, wav_path: str, output_path: str,
+                                   audio_format: str, audio_bitrate: str,
+                                   sample_rate: int) -> str:
+        """用 ffmpeg 将 WAV 转换为目标格式。返回最终文件路径。"""
+        if audio_format == "wav":
+            return wav_path
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            logger.warning("ffmpeg 未找到，回退为 WAV 输出")
+            if wav_path != output_path:
+                os.rename(wav_path, output_path)
+            return output_path
+
+        # 构建 ffmpeg 命令
+        cmd = [ffmpeg, "-y", "-i", wav_path, "-ar", str(sample_rate)]
+
+        # 格式特定参数
+        if audio_format == "mp3":
+            cmd += ["-codec:a", "libmp3lame", "-b:a", audio_bitrate]
+        elif audio_format == "aac" or audio_format == "m4a":
+            cmd += ["-codec:a", "aac", "-b:a", audio_bitrate]
+        elif audio_format == "ogg":
+            cmd += ["-codec:a", "libvorbis", "-b:a", audio_bitrate]
+        elif audio_format == "opus":
+            cmd += ["-codec:a", "libopus", "-b:a", audio_bitrate]
+        elif audio_format == "flac":
+            cmd += ["-codec:a", "flac"]
+        elif audio_format == "wma":
+            cmd += ["-codec:a", "wmav2", "-b:a", audio_bitrate]
+        else:
+            cmd += ["-b:a", audio_bitrate]
+
+        cmd.append(output_path)
+
+        logger.info(f"ffmpeg 转码: WAV → {audio_format} ({audio_bitrate})")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            logger.error(f"ffmpeg 转码失败: {result.stderr[:500]}")
+            # 回退：保留 WAV
+            if wav_path != output_path:
+                os.rename(wav_path, output_path)
+            return output_path
+
+        # 删除临时 WAV
+        if wav_path != output_path and os.path.exists(wav_path):
+            os.remove(wav_path)
+
+        return output_path
 
     def _report_progress(self, message: str, progress: float = None, ctx=None):
         if ctx:
@@ -401,7 +457,10 @@ class AudioConverter:
 
         if merged is not None:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            torchaudio.save(output_path, merged, sample_rate)
+            # 先保存为 WAV，再用 ffmpeg 转码到目标格式
+            wav_path = output_path if self.audio_format == "wav" else output_path + ".tmp.wav"
+            torchaudio.save(wav_path, merged, sample_rate)
+            self._convert_to_target_format(wav_path, output_path, self.audio_format, self.audio_bitrate, sample_rate)
 
         duration = merged.shape[-1] / sample_rate if merged is not None else 0
 
@@ -509,7 +568,9 @@ class AudioConverter:
             merged = audio_chunks[0]
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        torchaudio.save(output_path, merged, sample_rate)
+        wav_path = output_path if self.audio_format == "wav" else output_path + ".tmp.wav"
+        torchaudio.save(wav_path, merged, sample_rate)
+        self._convert_to_target_format(wav_path, output_path, self.audio_format, self.audio_bitrate, sample_rate)
 
         if metadata:
             self._write_metadata(output_path, metadata)
@@ -571,7 +632,9 @@ class AudioConverter:
             merged = audio_tensors[0]
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        torchaudio.save(output_path, merged, self.model.sampling_rate)
+        wav_path = output_path if self.audio_format == "wav" else output_path + ".tmp.wav"
+        torchaudio.save(wav_path, merged, self.model.sampling_rate)
+        self._convert_to_target_format(wav_path, output_path, self.audio_format, self.audio_bitrate, self.model.sampling_rate)
 
         if metadata:
             self._write_metadata(output_path, metadata)
@@ -651,7 +714,9 @@ class AudioConverter:
         
         # 保存音频
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        torchaudio.save(output_path, merged_audio, sample_rate)
+        wav_path = output_path if self.audio_format == "wav" else output_path + ".tmp.wav"
+        torchaudio.save(wav_path, merged_audio, sample_rate)
+        self._convert_to_target_format(wav_path, output_path, self.audio_format, self.audio_bitrate, sample_rate)
         
         if metadata:
             self._write_metadata(output_path, metadata)
@@ -751,7 +816,9 @@ class AudioConverter:
         
         # 保存音频
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        torchaudio.save(output_path, merged_audio, self.model.sampling_rate)
+        wav_path = output_path if self.audio_format == "wav" else output_path + ".tmp.wav"
+        torchaudio.save(wav_path, merged_audio, self.model.sampling_rate)
+        self._convert_to_target_format(wav_path, output_path, self.audio_format, self.audio_bitrate, self.model.sampling_rate)
         
         if metadata:
             self._write_metadata(output_path, metadata)

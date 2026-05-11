@@ -141,6 +141,11 @@ class TaskQueue:
                 configs = {c.key: c.value for c in db.query(SystemConfig).all()}
                 audio_dir = configs.get("audio_dir", "data/audio")
                 audio_format = configs.get("audio_format", "wav")
+                audio_bitrate = configs.get("audio_bitrate", "64k")
+
+                # 同步格式配置到 converter（实时生效）
+                self.converter.audio_format = audio_format
+                self.converter.audio_bitrate = audio_bitrate
 
                 # 解析预设参数
                 import json
@@ -212,7 +217,7 @@ class TaskQueue:
                 def progress_cb(msg, progress=None):
                     ctx.update_progress(msg, progress)
 
-                max_retries = 3
+                max_retries = int(configs.get("max_retries", "3"))
                 last_error = None
                 result = None
                 for attempt in range(max_retries):

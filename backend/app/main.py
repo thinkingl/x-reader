@@ -1050,11 +1050,13 @@ def get_config(db: Session = Depends(get_db)):
         
         # 音频输出配置
         "audio_format": configs.get("audio_format", "wav"),
+        "audio_bitrate": configs.get("audio_bitrate", "64k"),
         "sample_rate": int(configs.get("sample_rate", "24000")),
         "concurrency": int(configs.get("concurrency", "1")),
         
         # 超时配置
         "tts_timeout": int(configs.get("tts_timeout", "120")),
+        "max_retries": int(configs.get("max_retries", "3")),
         
         # 本地模型分段配置
         "local_chunk_size": int(configs.get("local_chunk_size", "200")),
@@ -1096,6 +1098,14 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool
     tts_config_keys = ["mimo_api_key", "mimo_base_url", "online_chunk_size"]
     if any(key in update_data for key in tts_config_keys):
         task_queue.configure_online_tts()
+
+    # 音频格式/码率实时生效
+    if "audio_format" in update_data or "audio_bitrate" in update_data:
+        if task_queue.converter:
+            if "audio_format" in update_data:
+                task_queue.converter.audio_format = update_data["audio_format"]
+            if "audio_bitrate" in update_data:
+                task_queue.converter.audio_bitrate = update_data["audio_bitrate"]
 
     return get_config(db)
 
@@ -1217,6 +1227,10 @@ async def test_tts(
         else:
             chunk_size = int(configs.get("local_chunk_size", "200"))
         task_queue.converter.chunk_size = chunk_size
+
+        # 设置音频格式/码率
+        task_queue.converter.audio_format = audio_format
+        task_queue.converter.audio_bitrate = configs.get("audio_bitrate", "64k")
 
         result = task_queue.converter.convert_chapter(
             text=text,

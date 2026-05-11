@@ -275,6 +275,26 @@ function Configuration() {
           ]} />
         </Form.Item>
 
+        <Form.Item noStyle shouldUpdate={(prev, cur) => prev.audio_format !== cur.audio_format}>
+          {({ getFieldValue }) => {
+            const fmt = getFieldValue('audio_format');
+            return fmt && fmt !== 'wav' ? (
+              <Form.Item label="音频码率" name="audio_bitrate" extra="WAV 为无损格式，无需设置码率">
+                <Select options={[
+                  { label: '32 kbps (极低)', value: '32k' },
+                  { label: '48 kbps (低)', value: '48k' },
+                  { label: '64 kbps (推荐·语音)', value: '64k' },
+                  { label: '96 kbps (中)', value: '96k' },
+                  { label: '128 kbps (标准)', value: '128k' },
+                  { label: '192 kbps (高)', value: '192k' },
+                  { label: '256 kbps (极高)', value: '256k' },
+                  { label: '320 kbps (最高)', value: '320k' },
+                ]} />
+              </Form.Item>
+            ) : null;
+          }}
+        </Form.Item>
+
         <Form.Item label="采样率" name="sample_rate">
           <Select options={[
             { label: '24000 Hz', value: 24000 },
@@ -390,6 +410,14 @@ function Configuration() {
           extra="单次 TTS 请求/生成的最大等待时间。GPU 较弱时建议调大（如 300-600）"
         >
           <InputNumber min={30} max={3600} step={30} style={{ width: '100%' }} />
+        </Form.Item>
+
+        <Form.Item 
+          label="失败重试次数" 
+          name="max_retries"
+          extra="转换失败后自动重试的次数（0 = 不重试）"
+        >
+          <InputNumber min={0} max={10} style={{ width: '100%' }} />
         </Form.Item>
 
         <Form.Item>

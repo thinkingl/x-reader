@@ -185,9 +185,11 @@ class ConfigUpdate(BaseModel):
     
     # 超时配置
     tts_timeout: Optional[int] = None  # TTS 单次请求超时秒数
+    max_retries: Optional[int] = None  # 转换失败重试次数
     
     # 音频输出配置
     audio_format: Optional[str] = None
+    audio_bitrate: Optional[str] = None  # 非 WAV 格式的码率，如 "64k", "128k"
     sample_rate: Optional[int] = None
     concurrency: Optional[int] = None
     
@@ -221,9 +223,11 @@ class ConfigResponse(BaseModel):
     
     # 超时配置
     tts_timeout: int = 120  # TTS 单次请求超时秒数
+    max_retries: int = 3  # 转换失败重试次数
     
     # 音频输出配置
     audio_format: str = "wav"
+    audio_bitrate: str = "64k"  # 非 WAV 格式的码率
     sample_rate: int = 24000
     concurrency: int = 1
     
