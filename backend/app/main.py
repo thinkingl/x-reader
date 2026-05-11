@@ -19,8 +19,6 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
 )
-from concurrent.futures import ThreadPoolExecutor
-
 from app.database import get_db, init_db
 from app.models.database import Book, Chapter, Task, VoicePreset, SystemConfig, TaskStatus
 from app.schemas import (
@@ -97,7 +95,7 @@ def require_auth(
 
 
 @app.on_event("startup")
-def startup():
+async def startup():
     init_db()
     # Read config from database
     db = next(get_db())
@@ -198,12 +196,11 @@ def startup():
 
     # 从配置读取并发数并更新（必须在任务提交前）
     concurrency = int(configs.get("concurrency", "1"))
-    if concurrency != task_queue.max_workers:
-        task_queue.max_workers = concurrency
-        old_executor = task_queue.executor
-        task_queue.executor = ThreadPoolExecutor(max_workers=concurrency)
-        old_executor.shutdown(wait=False)
-        logger.info(f"并发数设置为: {concurrency}")
+    task_queue.max_workers = concurrency
+    logger.info(f"并发数设置为: {concurrency}")
+
+    # 初始化 asyncio 任务队列
+    await task_queue.start()
 
     # 3. 重新提交所有 QUEUED + PENDING 任务（必须在 converter 初始化后）
     db = next(get_db())
@@ -211,15 +208,18 @@ def startup():
         Task.status.in_([TaskStatus.QUEUED, TaskStatus.PENDING])
     ).all()
     for task in resubmit_tasks:
-        task_queue.submit_task(task.id, db)
+        await task_queue.submit_task(task.id, db)
     if resubmit_tasks:
         logger.info(f"已重新提交 {len(resubmit_tasks)} 个任务")
     db.close()
 
 
 @app.on_event("shutdown")
-def shutdown():
+async def shutdown():
     """优雅退出：将进行中的任务标记为 QUEUED，下次启动可自动恢复"""
+    # 先取消所有异步任务
+    await task_queue.shutdown()
+
     db = next(get_db())
     try:
         running = db.query(Task).filter(Task.status == TaskStatus.RUNNING).all()
@@ -236,7 +236,6 @@ def shutdown():
         logger.warning(f"保存任务状态失败: {e}")
     finally:
         db.close()
-    task_queue.shutdown()
 
 
 # Auth endpoints
@@ -526,7 +525,7 @@ def reparse_book(book_id: int, db: Session = Depends(get_db), _auth: bool = Depe
 
 
 @app.post("/api/tasks", response_model=TaskResponse)
-def create_task(data: TaskCreate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
+async def create_task(data: TaskCreate, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     book = db.query(Book).filter(Book.id == data.book_id).first()
     if not book:
         raise HTTPException(404, "Book not found")
@@ -568,7 +567,7 @@ def create_task(data: TaskCreate, db: Session = Depends(get_db), _auth: bool = D
         db.add(task)
         db.commit()
         db.refresh(task)
-        task_queue.submit_task(task.id, db)
+        await task_queue.submit_task(task.id, db)
         last_task = task
 
     if not last_task:
@@ -612,7 +611,7 @@ def list_tasks(
 
 
 @app.post("/api/tasks/{task_id}/retry", response_model=TaskResponse)
-def retry_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
+async def retry_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depends(require_auth)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(404, "Task not found")
@@ -631,7 +630,7 @@ def retry_task(task_id: int, db: Session = Depends(get_db), _auth: bool = Depend
     task.finished_at = None
     db.commit()
 
-    task_queue.submit_task(task.id, db)
+    await task_queue.submit_task(task.id, db)
     return task
 
 
@@ -1087,11 +1086,7 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db), _auth: bool
 
     if "concurrency" in update_data:
         new_workers = int(update_data["concurrency"])
-        task_queue.max_workers = new_workers
-        # ThreadPoolExecutor 不支持动态修改 max_workers，需要重建
-        old_executor = task_queue.executor
-        task_queue.executor = ThreadPoolExecutor(max_workers=new_workers)
-        old_executor.shutdown(wait=False)
+        task_queue.set_concurrency(new_workers)
 
     if "local_chunk_size" in update_data:
         if task_queue.converter:

@@ -1,7 +1,7 @@
 import os
 import sys
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -49,10 +49,15 @@ def mock_audio_converter():
 def mock_task_queue():
     with patch("app.main.task_queue") as mock:
         mock.max_workers = 1
-        mock.executor = MagicMock()
-        mock.submit_task = MagicMock()
-        mock.submit_book_tasks = MagicMock()
-        mock.shutdown = MagicMock()
+        mock.submit_task = AsyncMock()
+        mock.submit_book_tasks = AsyncMock()
+        mock.shutdown = AsyncMock()
+        mock.start = AsyncMock()
+        mock.cancel_task = MagicMock()
+        mock.get_progress = MagicMock(return_value=None)
+        mock.set_concurrency = MagicMock()
+        mock.configure_online_tts = MagicMock()
+        mock.set_converter = MagicMock()
         yield mock
 
 

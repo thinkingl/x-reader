@@ -38,20 +38,27 @@ fi
 cd /app/backend
 echo "Starting backend on port 8000..."
 RETRY=0
+LAST_CRASH=0
 while true; do
+    START_TIME=$(date +%s)
     PYTHONPATH=/app/backend uvicorn app.main:app --host 0.0.0.0 --port 8000
-    RETRY=$((RETRY + 1))
-    if [ $RETRY -ge 5 ]; then
-        echo "Backend failed 5 times, exiting container..."
-        exit 1
-    fi
-    echo "Backend exited, restarting in 3s (attempt $RETRY/5)..."
-    sleep 3
-    # 如果正常运行超过30秒，重置重试计数
-    if [ $RETRY -gt 0 ]; then
-        sleep 30
+    EXIT_CODE=$?
+    NOW=$(date +%s)
+    ELAPSED=$((NOW - START_TIME))
+
+    # 如果正常运行超过60秒，重置重试计数
+    if [ $ELAPSED -ge 60 ]; then
         RETRY=0
     fi
+
+    RETRY=$((RETRY + 1))
+    if [ $RETRY -ge 5 ]; then
+        echo "Backend failed 5 consecutive times, exiting container..."
+        kill $FRONTEND_PID 2>/dev/null
+        exit 1
+    fi
+    echo "Backend exited (code=$EXIT_CODE, ran=${ELAPSED}s), restarting in 3s (attempt $RETRY/5)..."
+    sleep 3
 done &
 BACKEND_PID=$!
 
@@ -64,4 +71,9 @@ npx vite --host 0.0.0.0 --force &
 FRONTEND_PID=$!
 
 echo "Services: frontend=:5173 backend=:8000"
-wait $FRONTEND_PID
+
+# Wait for either process to exit, then exit the container
+wait -n $BACKEND_PID $FRONTEND_PID
+echo "A process exited, shutting down container..."
+kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
+exit 1

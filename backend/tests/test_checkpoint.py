@@ -159,7 +159,7 @@ class TestCheckpointConverter:
 
     def _make_conv(self):
         conv = _RealConv.__new__(_RealConv)
-        conv._report_progress = lambda msg, p=None: None
+        conv._report_progress = lambda msg, p=None, ctx=None: None
         conv.progress_callback = None
         conv.chunk_size = 200
         conv.chunk_size_en = 200

@@ -55,13 +55,14 @@ class AudioConverter:
             if tts_mode in ("online", "online_first"):
                 logger.warning("在线 TTS 模式但未提供 API Key")
 
-    def _report_progress(self, message: str, progress: float = None):
-        if self._cancelled:
-            raise Exception("任务已取消")
-        cb = getattr(self._local, 'progress_callback', None) or self.progress_callback
-        if cb:
-            cb(message, progress)
-        logger.info(message)
+    def _report_progress(self, message: str, progress: float = None, ctx=None):
+        if ctx:
+            ctx.update_progress(message, progress)
+        else:
+            cb = getattr(self._local, 'progress_callback', None) or self.progress_callback
+            if cb:
+                cb(message, progress)
+            logger.info(message)
 
     def _get_device(self, device: str) -> str:
         import torch
@@ -73,7 +74,7 @@ class AudioConverter:
             return "cpu"
         return device
 
-    def load_model(self):
+    def load_model(self, ctx=None):
         if self.model is None:
             self.device = self._get_device(self._device_str)
             
@@ -95,7 +96,7 @@ class AudioConverter:
                 
                 from omnivoice import OmniVoice
                 dtype = torch.float16 if self.precision == "float16" else torch.float32
-                self._report_progress(f"正在加载模型: {self.model_path} (设备: {self.device})")
+                self._report_progress(f"正在加载模型: {self.model_path} (设备: {self.device})", ctx=ctx)
                 self.model = OmniVoice.from_pretrained(
                     self.model_path,
                     device_map=self.device,
@@ -103,16 +104,16 @@ class AudioConverter:
                     load_asr=True,
                     asr_model_name=self.asr_model_path,
                 )
-                self._report_progress(f"模型加载完成 (设备: {self.device})")
+                self._report_progress(f"模型加载完成 (设备: {self.device})", ctx=ctx)
 
-    def _split_text(self, text: str, chunk_size: int = None, chunk_size_en: int = None) -> List[str]:
+    def _split_text(self, text: str, chunk_size: int = None, chunk_size_en: int = None, ctx=None) -> List[str]:
         """将长文本按标点符号分段，根据文本语言选择分段大小"""
         explicit = chunk_size is not None
         
         if chunk_size is None:
-            chunk_size = self.chunk_size
+            chunk_size = ctx.chunk_size if ctx and ctx.chunk_size is not None else self.chunk_size
         if chunk_size_en is None:
-            chunk_size_en = self.chunk_size_en
+            chunk_size_en = ctx.chunk_size_en if ctx and ctx.chunk_size_en is not None else self.chunk_size_en
         
         # 未显式指定 chunk_size 时，自动检测语言并切换
         if not explicit:
@@ -294,6 +295,7 @@ class AudioConverter:
         preset: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable] = None,
+        ctx=None,
     ) -> Dict[str, Any]:
         """带断点续传的转换：chunk 级缓存到 SQLite，避免内存累积"""
         from app.services.checkpoint import (
@@ -305,24 +307,28 @@ class AudioConverter:
             delete as cp_delete,
             exists as cp_exists,
         )
+        from app.services.task_context import TaskContext
         import io
 
-        cb = progress_callback or self.progress_callback
-        self._local.progress_callback = cb
-        start_time = time.time()
+        # 向后兼容：无 ctx 时创建临时 TaskContext
+        if ctx is None:
+            ctx = TaskContext(task_id=task_id)
+            cb = progress_callback or self.progress_callback
+            ctx._progress_callback = cb
+        ctx.start_time = time.time()
 
         params = preset or {}
         engine = params.get("engine", "local_omnivoice")
 
         # 1. 切分 chunk（不显式传 size 以便触发语言检测）
         chunk_size = params.get("chunk_size")
-        chunks = self._split_text(text, chunk_size=chunk_size)
+        chunks = self._split_text(text, chunk_size=chunk_size, ctx=ctx)
         total = len(chunks)
 
         # 2. 创建或加载 checkpoint DB（chunk 数变化则重建）
         existing_count = get_completed_count(task_id) + max(0, get_pending_count(task_id))
         if cp_exists(task_id) and existing_count != total:
-            self._report_progress(f"分段数变化({existing_count}→{total})，重建 checkpoint", 0)
+            self._report_progress(f"分段数变化({existing_count}→{total})，重建 checkpoint", 0, ctx=ctx)
             cp_delete(task_id)
         if not cp_create(task_id, chunks):
             raise Exception("无法创建 checkpoint 数据库")
@@ -330,7 +336,7 @@ class AudioConverter:
         pending = get_pending_count(task_id)
         completed = get_completed_count(task_id)
         if completed > 0:
-            self._report_progress(f"从断点恢复：已完成 {completed}/{total} 段，还剩 {pending} 段", 0)
+            self._report_progress(f"从断点恢复：已完成 {completed}/{total} 段，还剩 {pending} 段", 0, ctx=ctx)
 
         # 3. 转换未完成的 chunk
         for i, chunk_text in enumerate(chunks):
@@ -339,7 +345,7 @@ class AudioConverter:
                 continue
 
             progress = (i / total) * 100
-            self._report_progress(f"[Checkpoint] 转换第 {i+1}/{total} 段", progress)
+            self._report_progress(f"[Checkpoint] 转换第 {i+1}/{total} 段", progress, ctx=ctx)
 
             if engine == "online_mimo":
                 if not self.mimo_client:
@@ -354,7 +360,7 @@ class AudioConverter:
                     speed=params.get("speed", 1.0),
                 )
             else:
-                self.load_model()
+                self.load_model(ctx=ctx)
                 tensor = self._generate_single_chunk(
                     text=chunk_text,
                     voice_mode=params.get("voice_mode", "auto"),
@@ -374,7 +380,7 @@ class AudioConverter:
             save_chunk(task_id, i, audio_bytes)
 
         # 4. 合并所有 chunk 并写入最终文件
-        self._report_progress("正在合并音频...", 95)
+        self._report_progress("正在合并音频...", 95, ctx=ctx)
         import torchaudio, torch
 
         sample_rate = 24000 if engine == "online_mimo" else self.model.sampling_rate
@@ -406,8 +412,8 @@ class AudioConverter:
         # 5. 清理 checkpoint DB
         cp_delete(task_id)
 
-        elapsed = time.time() - start_time
-        self._report_progress(f"转换完成: {duration:.1f}s 音频, 耗时 {elapsed:.1f}s", 100)
+        elapsed = time.time() - ctx.start_time
+        self._report_progress(f"转换完成: {duration:.1f}s 音频, 耗时 {elapsed:.1f}s", 100, ctx=ctx)
 
         if metadata and os.path.exists(output_path):
             self._write_metadata(output_path, metadata)
