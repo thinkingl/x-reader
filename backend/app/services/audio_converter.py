@@ -3,11 +3,15 @@ import logging
 import time
 import re
 import threading
+import io
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, List
 from datetime import datetime
 from mutagen import File as MutagenFile
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TCON, TRCK
+import numpy as np
+import torch
+import torchaudio
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +69,6 @@ class AudioConverter:
             logger.info(message)
 
     def _get_device(self, device: str) -> str:
-        import torch
         if device == "auto":
             if torch.cuda.is_available():
                 return "cuda"
@@ -90,10 +93,6 @@ class AudioConverter:
                 if self.model is not None:
                     return
 
-                # 延迟导入（仅首次加载模型时触发，避免启动时消耗CUDA内存）
-                global torch, torchaudio, np
-                import torch, torchaudio, numpy as np
-                
                 from omnivoice import OmniVoice
                 dtype = torch.float16 if self.precision == "float16" else torch.float32
                 self._report_progress(f"正在加载模型: {self.model_path} (设备: {self.device})", ctx=ctx)
@@ -308,7 +307,6 @@ class AudioConverter:
             exists as cp_exists,
         )
         from app.services.task_context import TaskContext
-        import io
 
         # 向后兼容：无 ctx 时创建临时 TaskContext
         if ctx is None:
@@ -372,7 +370,6 @@ class AudioConverter:
                     guidance_scale=params.get("guidance_scale", 2.0),
                     speed=params.get("speed", 1.0),
                 )
-                import torchaudio
                 buffer = io.BytesIO()
                 torchaudio.save(buffer, tensor, self.model.sampling_rate, format="wav")
                 audio_bytes = buffer.getvalue()
@@ -381,7 +378,6 @@ class AudioConverter:
 
         # 4. 合并所有 chunk 并写入最终文件
         self._report_progress("正在合并音频...", 95, ctx=ctx)
-        import torchaudio, torch
 
         sample_rate = 24000 if engine == "online_mimo" else self.model.sampling_rate
 
@@ -467,7 +463,6 @@ class AudioConverter:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """在线 MiMo TTS 转换"""
-        import torchaudio
         if not self.mimo_client:
             raise Exception("MiMo 客户端未配置")
 
@@ -478,7 +473,6 @@ class AudioConverter:
 
         self._report_progress(f"[MiMo] 文本分为 {total_chunks} 段，共 {len(text)} 字符", 0)
 
-        import io
         audio_chunks = []
         sample_rate = 24000
 
@@ -534,7 +528,6 @@ class AudioConverter:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """本地 OmniVoice TTS 转换"""
-        import torchaudio
         self.load_model()
 
         voice_mode = params.get("voice_mode", "auto")
@@ -632,7 +625,6 @@ class AudioConverter:
             )
             
             # 解码 WAV 音频
-            import io
             audio_buffer = io.BytesIO(audio_bytes)
             audio_tensor, sample_rate = torchaudio.load(audio_buffer)
             audio_chunks.append(audio_tensor)
