@@ -570,6 +570,10 @@ class MobiParser:
             # 优先使用 mobi7 HTML 解析（章节分割更精确）
             html_path = os.path.join(tempdir, "mobi7", "book.html")
             if os.path.exists(html_path):
+                ncx_path = os.path.join(tempdir, "mobi7", "toc.ncx")
+                result = self._parse_ncx_html(html_path, ncx_path)
+                if result:
+                    return result
                 return self._parse_html(html_path)
 
             ext = Path(filepath).suffix.lower()
@@ -583,6 +587,148 @@ class MobiParser:
                 raise ValueError(f"Unsupported extracted format: {ext}")
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)
+
+    def _parse_ncx_html(self, html_path: str, ncx_path: str) -> Optional[Dict[str, Any]]:
+        """使用 toc.ncx 书签目录精确分章"""
+        from xml.etree import ElementTree as ET
+        from bs4 import BeautifulSoup
+        import re
+
+        if not os.path.exists(ncx_path):
+            return None
+
+        # 解析 toc.ncx
+        ns = {'ncx': 'http://www.daisy.org/z3986/2005/ncx/'}
+        try:
+            tree = ET.parse(ncx_path)
+            root = tree.getroot()
+        except Exception:
+            return None
+
+        # 提取书签：(label, filepos)
+        bookmarks = []
+        for np in root.findall('.//ncx:navPoint', ns):
+            label_elem = np.find('ncx:navLabel/ncx:text', ns)
+            content_elem = np.find('ncx:content', ns)
+            if label_elem is None or content_elem is None:
+                continue
+            label = (label_elem.text or '').strip()
+            src = content_elem.get('src', '')
+            if '#filepos' not in src:
+                continue
+            try:
+                filepos = int(src.split('#filepos')[1])
+            except (ValueError, IndexError):
+                continue
+            bookmarks.append((label, filepos))
+
+        if len(bookmarks) < 3:
+            return None
+
+        bookmarks.sort(key=lambda x: x[1])
+
+        # 读取 book.html，找到每个 filepos anchor 的位置
+        with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
+            html = f.read()
+
+        positions = []
+        for label, filepos in bookmarks:
+            anchor = f'<a id="filepos{filepos}"'
+            idx = html.find(anchor)
+            if idx == -1:
+                continue
+            positions.append((label, idx))
+
+        if len(positions) < 3:
+            return None
+
+        # 章节标题模式
+        chapter_pattern = re.compile(
+            r'(?x)^(第.{1,12}?[章节篇卷讲](?:[\s·].*|$)|序|前言|后记|附录|目录|楔子|引子|尾声|-\d{1,3}-)'
+        )
+
+        # 按书签位置分割内容，匹配章节模式的为新章，否则并入前一章
+        soup = BeautifulSoup(html, "html.parser")
+        chapters = []
+        current_title = None
+        current_text = []
+
+        for i, (label, pos) in enumerate(positions):
+            end_pos = positions[i + 1][1] if i + 1 < len(positions) else len(html)
+            section_html = html[pos:end_pos]
+            section_soup = BeautifulSoup(section_html, "html.parser")
+            text = section_soup.get_text(separator="\n", strip=True)
+            if not text:
+                continue
+
+            if chapter_pattern.match(label):
+                if current_text:
+                    content = "\n".join(current_text).strip()
+                    if content and len(content) > 10:
+                        chapters.append({
+                            "chapter_number": len(chapters) + 1,
+                            "title": current_title or f"Chapter {len(chapters) + 1}",
+                            "text_content": content,
+                            "word_count": len(content),
+                        })
+                    current_text = []
+                current_title = label
+                current_text.append(text)
+            else:
+                if current_title is None:
+                    current_title = label
+                current_text.append(text)
+
+        if current_text:
+            content = "\n".join(current_text).strip()
+            if content and len(content) > 10:
+                chapters.append({
+                    "chapter_number": len(chapters) + 1,
+                    "title": current_title or f"Chapter {len(chapters) + 1}",
+                    "text_content": content,
+                    "word_count": len(content),
+                })
+
+        if not chapters:
+            return None
+
+        # 去重 + 重编号
+        seen = {}
+        for i, ch in enumerate(chapters):
+            t = ch["title"]
+            if t in seen:
+                prev_i = seen[t]
+                if chapters[prev_i]["word_count"] < chapters[i]["word_count"]:
+                    chapters.pop(prev_i)
+                else:
+                    chapters.pop(i)
+                for j, c in enumerate(chapters):
+                    c["chapter_number"] = j + 1
+                break
+            seen[t] = i
+
+        # 清理
+        for ch in chapters:
+            ch["text_content"] = inline_annotations(ch["text_content"])
+            ch["text_content"] = sanitize_text(ch["text_content"])
+            ch["word_count"] = len(ch["text_content"])
+
+        title = Path(self.file_path).stem
+        title_tag = BeautifulSoup(html, "html.parser").find("title")
+        if title_tag and title_tag.string:
+            title = title_tag.string.strip()
+
+        author = None
+        author_tag = BeautifulSoup(html, "html.parser").find("meta", attrs={"name": "author"})
+        if author_tag:
+            author = author_tag.get("content")
+
+        return {
+            "title": title,
+            "author": author,
+            "format": "mobi",
+            "chapters": chapters,
+        }
 
     def _parse_html(self, html_path: str) -> Dict[str, Any]:
         from bs4 import BeautifulSoup
