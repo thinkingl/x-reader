@@ -224,7 +224,7 @@ def split_soup_into_chapters(soup, fallback_title: str = "Chapter") -> List[Dict
 _GENERIC_TITLES = {"正文", "正文", "Chapter", "无标题", "Untitled"}
 
 
-def _get_chapter_title(soup, chapter_num: int) -> str:
+def _get_chapter_title(soup, chapter_num: int, book_title: str = "") -> str:
     """从 BeautifulSoup 中提取章节标题"""
     title_tag = soup.find(["h1", "h2", "h3"])
     if title_tag:
@@ -232,7 +232,7 @@ def _get_chapter_title(soup, chapter_num: int) -> str:
     html_title_tag = soup.find("title")
     if html_title_tag and html_title_tag.string:
         t = html_title_tag.string.strip()
-        if t not in _GENERIC_TITLES:
+        if t not in _GENERIC_TITLES and t != book_title:
             return t
 
     # 从正文首行提取标题（不修改 soup）
@@ -321,6 +321,45 @@ class EpubParser:
             chapters = []
             chapter_num = 0
 
+            # 解析 toc.ncx 获取章节标题映射 (href → title)
+            ncx_titles = {}
+            ncx_id = None
+            for item_id, href in manifest.items():
+                if item_id.lower() in ("ncx", "toc"):
+                    ncx_id = item_id
+                    break
+            if not ncx_id:
+                # 尝试直接找 toc.ncx
+                ncx_candidates = [n for n in epub_zip.namelist() if n.endswith("toc.ncx")]
+                if ncx_candidates:
+                    ncx_href = ncx_candidates[0]
+                else:
+                    ncx_href = None
+            else:
+                ncx_href = manifest[ncx_id]
+
+            if ncx_href:
+                try:
+                    ncx_content = epub_zip.read(ncx_href).decode("utf-8")
+                    ns = {'ncx': 'http://www.daisy.org/z3986/2005/ncx/'}
+                    ncx_root = ET.fromstring(ncx_content)
+                    for np in ncx_root.findall('.//ncx:navPoint', ns):
+                        label_elem = np.find('ncx:navLabel/ncx:text', ns)
+                        content_elem = np.find('ncx:content', ns)
+                        if label_elem is None or content_elem is None:
+                            continue
+                        label = (label_elem.text or '').strip()
+                        src = content_elem.get('src', '')
+                        # 提取 href（去掉 #filepos 部分）
+                        href_key = src.split('#')[0] if '#' in src else src
+                        # 规范化路径
+                        if opf_dir != ".":
+                            href_key = f"{opf_dir}/{href_key}"
+                        if href_key not in ncx_titles:
+                            ncx_titles[href_key] = label
+                except Exception:
+                    pass
+
             if spine_ids:
                 # Use spine order
                 for idref in spine_ids:
@@ -342,7 +381,8 @@ class EpubParser:
                     if idref in ("cover", "coverpage", "nav", "toc"):
                         continue
 
-                    chapter_title = _get_chapter_title(soup, chapter_num)
+                    # 优先使用 toc.ncx 书签标题
+                    chapter_title = ncx_titles.get(file_path) or _get_chapter_title(soup, chapter_num, title)
                     head_tag = soup.find("head")
                     if head_tag:
                         head_tag.decompose()
@@ -382,7 +422,8 @@ class EpubParser:
                     content = epub_zip.read(name).decode("utf-8", errors="ignore")
                     soup = BeautifulSoup(content, "html.parser")
 
-                    chapter_title = _get_chapter_title(soup, chapter_num)
+                    # 优先使用 toc.ncx 书签标题
+                    chapter_title = ncx_titles.get(name) or _get_chapter_title(soup, chapter_num, title)
                     head_tag = soup.find("head")
                     if head_tag:
                         head_tag.decompose()
