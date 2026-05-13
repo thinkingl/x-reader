@@ -394,8 +394,8 @@ class AudioConverter:
 
         # 3. 转换未完成的 chunk
         for i, chunk_text in enumerate(chunks):
-            # 跳过已完成的
-            if completed > 0 and i < get_completed_count(task_id):
+            # 跳过已完成的（用本地计数器避免重复查 DB）
+            if i < completed:
                 continue
 
             progress = (i / total) * 100
@@ -432,37 +432,66 @@ class AudioConverter:
 
             save_chunk(task_id, i, audio_bytes)
 
-        # 4. 合并所有 chunk 并写入最终文件
+        logger.info(f"[合并] chunk 转换/跳过完成, 开始合并...")
+
+        # 4. 合并所有 chunk 并写入最终文件（流式写入，O(1) 内存）
         self._report_progress("正在合并音频...", 95, ctx=ctx)
+        import wave
 
         sample_rate = 24000 if engine == "online_mimo" else self.model.sampling_rate
 
-        # 收集所有张量后一次性拼接，O(N) 优于增量 O(N²)
-        tensors = []
+        t0 = time.time()
         total = get_completed_count(task_id)
-        for idx, (_, audio_bytes) in enumerate(iter_completed(task_id)):
-            buffer = io.BytesIO(audio_bytes)
-            tensor, sr = torchaudio.load(buffer)
-            tensors.append(tensor)
+        logger.info(f"[合并] 开始流式合并 {total} 个 chunk...")
 
-        if tensors:
-            parts = []
-            for i, t in enumerate(tensors):
-                if i > 0:
-                    parts.append(torch.zeros(1, int(0.3 * sample_rate)))
-                parts.append(t)
-            merged = torch.cat(parts, dim=1)
-        else:
-            merged = None
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        wav_path = output_path if self.audio_format == "wav" else output_path + ".tmp.wav"
 
-        if merged is not None:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            # 先保存为 WAV，再用 ffmpeg 转码到目标格式
-            wav_path = output_path if self.audio_format == "wav" else output_path + ".tmp.wav"
-            torchaudio.save(wav_path, merged, sample_rate)
-            self._convert_to_target_format(wav_path, output_path, self.audio_format, self.audio_bitrate, sample_rate)
+        # 第一遍：从第一个 chunk 提取 WAV 格式参数
+        first_chunk = None
+        for _, audio_bytes in iter_completed(task_id):
+            first_chunk = audio_bytes
+            break
+        if first_chunk is None:
+            raise Exception("No completed chunks to merge")
 
-        duration = merged.shape[-1] / sample_rate if merged is not None else 0
+        with io.BytesIO(first_chunk) as buf:
+            with wave.open(buf, 'rb') as wf:
+                nchannels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                framerate = wf.getframerate()
+
+        # 静音间隔
+        gap_frames = int(0.3 * framerate)
+        silence = b'\x00' * (gap_frames * nchannels * sampwidth)
+
+        # 第二遍：逐 chunk 流式写入 WAV 文件
+        with wave.open(wav_path, 'wb') as out:
+            out.setnchannels(nchannels)
+            out.setsampwidth(sampwidth)
+            out.setframerate(framerate)
+
+            total_frames = 0
+            for idx, (_, audio_bytes) in enumerate(iter_completed(task_id)):
+                with io.BytesIO(audio_bytes) as buf:
+                    with wave.open(buf, 'rb') as wf:
+                        frames = wf.readframes(wf.getnframes())
+                        if idx > 0:
+                            out.writeframes(silence)
+                            total_frames += gap_frames
+                        out.writeframes(frames)
+                        total_frames += wf.getnframes()
+
+                if idx < 3 or (idx + 1) % 200 == 0 or idx == total - 1:
+                    logger.info(f"[合并] 写入 chunk {idx+1}/{total} ({len(audio_bytes)} bytes)")
+
+        duration = total_frames / framerate
+        logger.info(f"[合并] WAV 流式写入完成: {duration:.1f}s 音频, 耗时 {time.time()-t0:.2f}s")
+
+        t1 = time.time()
+        self._convert_to_target_format(wav_path, output_path, self.audio_format, self.audio_bitrate, framerate)
+        logger.info(f"[合并] 格式转换完成 ({self.audio_format}), 耗时 {time.time()-t1:.2f}s")
+        logger.info(f"[合并] 全部完成: {duration:.1f}s 音频, 总耗时 {time.time()-t0:.2f}s")
 
         # 5. 清理 checkpoint DB
         cp_delete(task_id)
