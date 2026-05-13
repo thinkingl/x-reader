@@ -271,6 +271,11 @@ class TaskQueue:
             except TaskCancelledError:
                 logger.info(f"Task {task_id} cancelled")
                 try:
+                    from app.services.checkpoint import delete as cp_delete
+                    cp_delete(task_id)
+                except Exception:
+                    pass
+                try:
                     task = db.query(Task).filter(Task.id == task_id).first()
                     if task:
                         task.status = TaskStatus.CANCELLED
