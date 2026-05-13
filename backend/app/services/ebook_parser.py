@@ -608,7 +608,7 @@ class MobiParser:
 
         # 章节标题模式：包括 "第X章"、"序"、"-1-" 等数字标记
         chapter_pattern = re.compile(
-            r'(?x)^(第.{1,12}?[章节篇卷](?:\s+|$)|序|前言|后记|附录|目录|楔子|引子|尾声|-\d{1,3}-)'
+            r'(?x)^(第.{1,12}?[章节篇卷讲](?:[\s·].*|$)|序|前言|后记|附录|目录|楔子|引子|尾声|-\d{1,3}-)'
         )
 
         # 按章节分割 - 先尝试 p 标签，不足时回退到 h1-h3
@@ -655,6 +655,22 @@ class MobiParser:
 
             if len(chapters) > 3:  # 找到了足够的章节，退出
                 break
+
+        # 去掉 TOC 残留：如果首章标题与后面章节重复且内容更短，删除首章
+        if len(chapters) > 1:
+            seen_titles = {}
+            for i, ch in enumerate(chapters):
+                t = ch["title"]
+                if t in seen_titles:
+                    prev_i = seen_titles[t]
+                    if chapters[prev_i]["word_count"] < chapters[i]["word_count"]:
+                        chapters.pop(prev_i)
+                    else:
+                        chapters.pop(i)
+                    for j, c in enumerate(chapters):
+                        c["chapter_number"] = j + 1
+                    break
+                seen_titles[t] = i
 
         # 如果没有按标题分割成功，尝试按段落分割
         if not chapters:
