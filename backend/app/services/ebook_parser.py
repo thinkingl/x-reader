@@ -642,12 +642,12 @@ class MobiParser:
         if len(positions) < 3:
             return None
 
-        # 章节标题模式
-        chapter_pattern = re.compile(
-            r'(?x)^(第.{1,12}?[章节篇卷讲](?:[\s·].*|$)|序|前言|后记|附录|目录|楔子|引子|尾声|-\d{1,3}-)'
+        # 子条目模式：甲、乙、子、丑、一、二 等，不是子条目的即为章节边界
+        sub_section_pattern = re.compile(
+            r'(?x)^[一二三四五六七八九十]{1,2}、|^[甲乙丙丁戊己庚辛壬癸]、|^[子丑寅卯辰巳午未申酉戌亥]、'
         )
 
-        # 按书签位置分割内容，匹配章节模式的为新章，否则并入前一章
+        # 按书签位置分割内容，非子条目即为新章，子条目并入前一章
         soup = BeautifulSoup(html, "html.parser")
         chapters = []
         current_title = None
@@ -661,7 +661,7 @@ class MobiParser:
             if not text:
                 continue
 
-            if chapter_pattern.match(label):
+            if not sub_section_pattern.match(label):
                 if current_text:
                     content = "\n".join(current_text).strip()
                     if content and len(content) > 10:
