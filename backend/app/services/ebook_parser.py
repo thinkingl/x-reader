@@ -388,8 +388,8 @@ class EpubParser:
                         head_tag.decompose()
                     text = soup.get_text(separator="\n", strip=True)
                     
-                    # 如果 spine 文件总数很少（<=3），且单个文件文本 >100KB，尝试文本级拆分
-                    if len(spine_ids) <= 3 and len(text) > 100000:
+                    # 如果单个文件文本 >20KB，尝试文本级拆分
+                    if len(text) > 20000:
                         sub_chapters = split_soup_into_chapters(soup, chapter_title)
                         if len(sub_chapters) > 1:
                             for sc in sub_chapters:
@@ -429,8 +429,8 @@ class EpubParser:
                         head_tag.decompose()
                     text = soup.get_text(separator="\n", strip=True)
 
-                    # 如果单个文件特别大（>100KB文本），尝试文本级拆分
-                    if len(text) > 100000:
+                    # 如果单个文件文本 >20KB，尝试文本级拆分
+                    if len(text) > 20000:
                         sub_chapters = split_soup_into_chapters(soup, chapter_title)
                         if len(sub_chapters) > 1:
                             for sc in sub_chapters:
