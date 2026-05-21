@@ -19,7 +19,7 @@ class TestLostChildEpub:
         assert parsed["format"] == "epub"
 
     def test_total_chapters(self, parsed):
-        assert len(parsed["chapters"]) == 170
+        assert len(parsed["chapters"]) == 167
 
     def test_first_chapter_is_copyright(self, parsed):
         assert parsed["chapters"][0]["title"] == "版权信息"
@@ -41,7 +41,7 @@ class TestLostChildEpub:
 
     def test_chapter_numbers_sequential(self, parsed):
         numbers = [ch["chapter_number"] for ch in parsed["chapters"]]
-        assert numbers == list(range(1, 171))
+        assert numbers == list(range(1, 168))
 
     def test_chapter_content_not_empty(self, parsed):
         for ch in parsed["chapters"]:

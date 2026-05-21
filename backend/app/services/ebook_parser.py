@@ -2,10 +2,18 @@ import os
 import re
 import zipfile
 import xml.etree.ElementTree as ET
+import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
-# 章节标题匹配模式
+from app.services.chapter_modes import (
+    Chapter, score_chapters, build_chapters, select_best_mode,
+    create_all_regex_modes, NcxBookmarkMode, SpineFileMode,
+)
+
+logger = logging.getLogger(__name__)
+
+# 章节标题匹配模式（保留用于向后兼容）
 _CHAPTER_NUM_RE = re.compile(
     r'(?:'
     r'第[0-9零一二三四五六七八九十百千万]+\s*[章节篇卷部]'  # 第X章
@@ -258,6 +266,93 @@ class EpubParser:
     def __init__(self, file_path: str):
         self.file_path = file_path
 
+    def _try_modes(self, epub_zip, opf_dir, spine_ids, manifest, title) -> Optional[List[Dict]]:
+        """尝试用模式系统解析，返回 chapters 列表或 None"""
+        from bs4 import BeautifulSoup
+
+        # 找 toc.ncx
+        ncx_href = None
+        for item_id, href in manifest.items():
+            if item_id.lower() in ("ncx", "toc"):
+                ncx_href = href
+                break
+        if not ncx_href:
+            candidates = [n for n in epub_zip.namelist() if n.endswith("toc.ncx")]
+            if candidates:
+                ncx_href = candidates[0]
+        # 规范化路径（manifest 中的 href 相对于 opf_dir）
+        if ncx_href and opf_dir != ".":
+            ncx_href = f"{opf_dir}/{ncx_href}"
+
+        ncx_path = None
+        if ncx_href:
+            # 提取 ncx 到临时文件
+            import tempfile
+            ncx_data = epub_zip.read(ncx_href)
+            tmp = tempfile.NamedTemporaryFile(suffix=".ncx", delete=False)
+            tmp.write(ncx_data)
+            tmp.close()
+            ncx_path = tmp.name
+
+        try:
+            # 构建上下文
+            ncx_titles = {}
+            if ncx_path:
+                from app.services.chapter_modes.ncx_mode import parse_ncx
+                bookmarks = parse_ncx(ncx_path)
+                for b in bookmarks:
+                    href = b["href"]
+                    if opf_dir != ".":
+                        href = f"{opf_dir}/{href}"
+                    if href not in ncx_titles:
+                        ncx_titles[href] = b["title"]
+
+            context = {
+                "epub_zip": epub_zip,
+                "opf_dir": opf_dir,
+                "spine_ids": spine_ids,
+                "manifest": manifest,
+                "book_title": title,
+                "ncx_path": ncx_path,
+                "ncx_titles": ncx_titles,
+            }
+
+            # 尝试所有模式
+            candidates = []
+
+            # NCX 模式
+            ncx_mode = NcxBookmarkMode(format_type="epub")
+            if ncx_mode.applicable(context):
+                chapters = ncx_mode.extract(context)
+                if chapters:
+                    candidates.append(("ncx_bookmark", chapters))
+
+            # Spine 模式（回退）
+            spine_mode = SpineFileMode()
+            if spine_mode.applicable(context):
+                chapters = spine_mode.extract(context)
+                if chapters:
+                    candidates.append(("spine_file", chapters))
+
+            # 选择最佳
+            best_name, best_chapters = select_best_mode(candidates, min_score=20)
+            if best_name and len(best_chapters) >= 2:
+                logger.info(f"EPUB 模式选择: {best_name} ({len(best_chapters)} 章)")
+                return [
+                    {
+                        "chapter_number": i + 1,
+                        "title": ch.title,
+                        "text_content": ch.text_content,
+                        "word_count": ch.word_count,
+                    }
+                    for i, ch in enumerate(best_chapters)
+                ]
+        finally:
+            if ncx_path and os.path.exists(ncx_path):
+                os.unlink(ncx_path)
+
+        return None
+
     def parse(self) -> Dict[str, Any]:
         from bs4 import BeautifulSoup
 
@@ -317,7 +412,22 @@ class EpubParser:
                     if idref:
                         spine_ids.append(idref)
 
-            # Parse chapters
+            # 尝试模式系统解析（优先）
+            mode_result = self._try_modes(epub_zip, opf_dir, spine_ids, manifest, title)
+            if mode_result:
+                # 模式系统成功，直接返回
+                for ch in mode_result:
+                    ch["text_content"] = inline_annotations(ch["text_content"])
+                    ch["text_content"] = sanitize_text(ch["text_content"])
+                    ch["word_count"] = len(ch["text_content"])
+                return {
+                    "title": title,
+                    "author": author,
+                    "format": "epub",
+                    "chapters": mode_result,
+                }
+
+            # 回退到原有逻辑
             chapters = []
             chapter_num = 0
 
@@ -535,11 +645,48 @@ class TxtParser:
     def __init__(self, file_path: str):
         self.file_path = file_path
 
+    def _try_modes(self, content: str, title: str) -> Optional[List[Dict]]:
+        """尝试用模式系统解析 TXT"""
+        context = {"text": content}
+
+        candidates = []
+        for mode in create_all_regex_modes():
+            if mode.applicable(context):
+                chapters = mode.extract(context)
+                if chapters:
+                    candidates.append((mode.name, chapters))
+
+        best_name, best_chapters = select_best_mode(candidates, min_score=20)
+        if best_name and len(best_chapters) >= 2:
+            logger.info(f"TXT 模式选择: {best_name} ({len(best_chapters)} 章)")
+            return [
+                {
+                    "chapter_number": i + 1,
+                    "title": ch.title,
+                    "text_content": ch.text_content,
+                    "word_count": ch.word_count,
+                }
+                for i, ch in enumerate(best_chapters)
+            ]
+        return None
+
     def parse(self) -> Dict[str, Any]:
         with open(self.file_path, "r", encoding="utf-8") as f:
             content = f.read()
 
         title = Path(self.file_path).stem
+
+        # 尝试模式系统
+        mode_result = self._try_modes(content, title)
+        if mode_result:
+            return {
+                "title": title,
+                "author": None,
+                "format": "txt",
+                "chapters": mode_result,
+            }
+
+        # 回退到原有逻辑
         pattern = r"^\s*((?:第.{1,10}[章节篇]).*|(?:Chapter\s+\d+).*)\s*$"
         lines = content.split("\n")
 
@@ -554,8 +701,8 @@ class TxtParser:
                 if stripped and re.fullmatch(r"[A-Z ]{3,}", stripped):
                     match = type("M", (), {"group": lambda self, n: stripped})()
                 elif stripped and re.match(r"\d+[．.]\s*[A-Z]", stripped):
-                    title = re.sub(r"^\d+[．.]\s*", "", stripped)
-                    match = type("M", (), {"group": lambda self, n, t=title: t})()
+                    t = re.sub(r"^\d+[．.]\s*", "", stripped)
+                    match = type("M", (), {"group": lambda self, n, t=t: t})()
             if match:
                 if current_chapter or current_text:
                     text = "\n".join(current_text).strip()
@@ -601,6 +748,70 @@ class MobiParser:
     def __init__(self, file_path: str):
         self.file_path = file_path
 
+    def _try_modes(self, html_path: str, ncx_path: str) -> Optional[Dict[str, Any]]:
+        """尝试用模式系统解析 MOBI"""
+        from bs4 import BeautifulSoup
+
+        title = Path(self.file_path).stem
+        author = None
+
+        # 读取 HTML 获取元数据
+        with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
+            html = f.read()
+        soup = BeautifulSoup(html, "html.parser")
+        title_tag = soup.find("title")
+        if title_tag and title_tag.string:
+            title = title_tag.string.strip()
+        author_tag = soup.find("meta", attrs={"name": "author"})
+        if author_tag:
+            author = author_tag.get("content")
+
+        # 构建上下文
+        context = {
+            "html_path": html_path,
+            "ncx_path": ncx_path,
+            "text": soup.get_text(separator="\n", strip=True),
+        }
+
+        candidates = []
+
+        # NCX 模式（mobi）
+        ncx_mode = NcxBookmarkMode(format_type="mobi")
+        if ncx_mode.applicable(context):
+            chapters = ncx_mode.extract(context)
+            if chapters:
+                candidates.append(("ncx_bookmark", chapters))
+
+        # 正则模式（在文本上尝试各种模式）
+        text = context["text"]
+        if text:
+            for mode in create_all_regex_modes():
+                if mode.applicable(context):
+                    chapters = mode.extract(context)
+                    if chapters:
+                        candidates.append((mode.name, chapters))
+
+        # 选择最佳
+        best_name, best_chapters = select_best_mode(candidates, min_score=20)
+        if best_name and len(best_chapters) >= 2:
+            logger.info(f"MOBI 模式选择: {best_name} ({len(best_chapters)} 章)")
+            return {
+                "title": title,
+                "author": author,
+                "format": "mobi",
+                "chapters": [
+                    {
+                        "chapter_number": i + 1,
+                        "title": ch.title,
+                        "text_content": ch.text_content,
+                        "word_count": ch.word_count,
+                    }
+                    for i, ch in enumerate(best_chapters)
+                ],
+            }
+
+        return None
+
     def parse(self) -> Dict[str, Any]:
         import mobi
         import shutil
@@ -612,6 +823,13 @@ class MobiParser:
             html_path = os.path.join(tempdir, "mobi7", "book.html")
             if os.path.exists(html_path):
                 ncx_path = os.path.join(tempdir, "mobi7", "toc.ncx")
+
+                # 尝试模式系统
+                result = self._try_modes(html_path, ncx_path)
+                if result:
+                    return result
+
+                # 回退到原有逻辑
                 result = self._parse_ncx_html(html_path, ncx_path)
                 if result:
                     return result
