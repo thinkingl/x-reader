@@ -714,33 +714,24 @@ def download_book_audio_zip(book_id: int, db: Session = Depends(get_db), _auth: 
     if not chapters:
         raise HTTPException(404, "No audio files found")
 
-    class _ZipPipe:
-        """zipfile → StreamingResponse 的桥梁：write() 缓冲数据，flush() 取出并清空"""
-        def __init__(self):
-            self._buf = bytearray()
-        def write(self, data: bytes) -> int:
-            self._buf.extend(data)
-            return len(data)
-        def flush(self) -> bytes:
-            chunk = bytes(self._buf)
-            self._buf.clear()
-            return chunk
-
     def generate_zip_stream():
-        pipe = _ZipPipe()
-        with zipfile.ZipFile(pipe, 'w', zipfile.ZIP_STORED) as zf:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
             if book.file_path and os.path.exists(book.file_path):
                 zf.write(book.file_path, Path(book.file_path).name)
-                yield pipe.flush()
 
             for chapter in chapters:
                 if os.path.exists(chapter.audio_path):
                     ext = Path(chapter.audio_path).suffix
                     arcname = f"{chapter.chapter_number:03d}_{chapter.title or chapter.id}{ext}"
                     zf.write(chapter.audio_path, arcname)
-                    yield pipe.flush()
 
-        yield pipe.flush()
+        buf.seek(0)
+        while True:
+            chunk = buf.read(256 * 1024)
+            if not chunk:
+                break
+            yield chunk
 
     filename = urllib.parse.quote(f"{book.title}.zip")
     return StreamingResponse(

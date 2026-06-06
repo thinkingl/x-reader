@@ -62,12 +62,23 @@ def mock_task_queue():
 
 
 @pytest.fixture
+def db(client):
+    """提供测试数据库 session，依赖 client fixture 确保表已创建"""
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture
 def client():
     Base.metadata.create_all(bind=engine)
-    # Reset the global auth manager for each test
     import app.main as main_module
     main_module._global_auth_manager = None
     from fastapi.testclient import TestClient
-    with TestClient(app) as c:
-        yield c
+    with patch.object(main_module, "init_db", lambda: Base.metadata.create_all(bind=engine)), \
+         patch.object(main_module, "get_db", override_get_db):
+        with TestClient(app) as c:
+            yield c
     Base.metadata.drop_all(bind=engine)
