@@ -7,20 +7,24 @@ import api from '../api';
 function BookList() {
   const [books, setBooks] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadAuthor, setUploadAuthor] = useState('');
   const navigate = useNavigate();
+  const pageSize = 20;
 
   useEffect(() => {
     fetchBooks();
-  }, []);
+  }, [page]);
 
   const fetchBooks = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/api/books');
+      const res = await api.get('/api/books', { params: { page, page_size: pageSize } });
       setBooks(res.data.items);
+      setTotal(res.data.total);
     } catch (err) {
       message.error('获取图书列表失败');
     }
@@ -31,7 +35,11 @@ function BookList() {
     try {
       await api.delete(`/api/books/${id}`);
       message.success('删除成功');
-      fetchBooks();
+      if (books.length === 1 && page > 1) {
+        setPage(page - 1);
+      } else {
+        fetchBooks();
+      }
     } catch (err) {
       message.error('删除失败');
     }
@@ -49,7 +57,11 @@ function BookList() {
       setUploadModalVisible(false);
       setUploadTitle('');
       setUploadAuthor('');
-      fetchBooks();
+      if (page !== 1) {
+        setPage(1);
+      } else {
+        fetchBooks();
+      }
     } catch (err) {
       message.error('上传失败');
     }
@@ -105,6 +117,13 @@ function BookList() {
         dataSource={books}
         rowKey="id"
         loading={loading}
+        pagination={{
+          current: page,
+          pageSize: pageSize,
+          total: total,
+          showSizeChanger: false,
+          onChange: (p) => setPage(p),
+        }}
       />
 
       <Modal

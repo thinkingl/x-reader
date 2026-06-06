@@ -128,6 +128,57 @@ docker-compose down    # 停止服务
   ```
 - 环境变量: `PYTHONPATH=/app/backend`, `ALLOW_MODEL_DOWNLOAD=true`
 
+### 当前运行环境
+
+- 容器名: `x-reader`，镜像: `172.16.240.100:5000/x-reader-cuda:latest`
+- 端口映射: `8080:8000` (后端 API), `5173:5173` (前端 Vite dev server)
+- sudo 密码: `xxxxxx`（docker 命令需要 sudo）
+- 容器内同时运行后端 (uvicorn) 和前端 (vite dev server)，Vite HMR 自动热更新
+- entrypoint.sh: 后端崩溃自动重启（5 次连续失败后退出容器），前端 vite --force
+
+### 部署代码修改
+
+前端/后端代码修改后，无需重建镜像，直接 `docker cp` 到容器即可：
+
+```bash
+# 前端修改（Vite HMR 自动刷新浏览器，无需重启）
+echo "xxxxxx" | sudo -S docker cp frontend/src/pages/XXX.jsx x-reader:/app/frontend/src/pages/XXX.jsx
+
+# 后端修改（需要重启容器）
+echo "xxxxxx" | sudo -S docker cp backend/app/main.py x-reader:/app/backend/app/main.py
+echo "xxxxxx" | sudo -S docker restart x-reader
+```
+
+### 运行测试
+
+```bash
+# 方式 1: 在容器内运行 pytest（推荐，环境一致）
+echo "xxxxxx" | sudo -S docker exec x-reader bash -c 'cd /app/backend && PYTHONPATH=/app/backend python3 -m pytest tests/ -v --tb=short'
+
+# 方式 2: 挂载本地代码运行（需本地有 .venv 和依赖）
+docker run --rm --entrypoint python3 --network=host \
+  -v $(pwd)/backend:/app/backend:ro \
+  -v $(pwd)/models:/app/models:ro \
+  -w /app/backend 172.16.240.100:5000/x-reader-cuda:latest \
+  -m pytest tests/ -v --tb=short
+```
+
+### 常用调试命令
+
+```bash
+# 查看容器状态
+echo "xxxxxx" | sudo -S docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+# 查看容器日志
+echo "xxxxxx" | sudo -S docker logs x-reader --tail 50
+
+# 进入容器 shell
+echo "xxxxxx" | sudo -S docker exec -it x-reader bash
+
+# 测试 API 是否正常
+curl -s http://localhost:8080/api/books?page=1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'total={d[\"total\"]}')"
+```
+
 ## 当前状态
 
 ### 已完成
