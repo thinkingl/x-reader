@@ -500,8 +500,6 @@ def reparse_book(book_id: int, db: Session = Depends(get_db), _auth: bool = Depe
     except Exception as e:
         raise HTTPException(400, f"重新解析失败: {str(e)}")
 
-    book.title = result["title"]
-    book.author = result["author"]
     book.chapter_count = len(result["chapters"])
     book.status = "parsed"
 
@@ -716,42 +714,37 @@ def download_book_audio_zip(book_id: int, db: Session = Depends(get_db), _auth: 
     if not chapters:
         raise HTTPException(404, "No audio files found")
 
-    def generate_zip():
-        """生成器：流式生成zip文件"""
-        # 使用临时文件来构建zip
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
-            tmp_path = tmp_file.name
+    class _ZipPipe:
+        """zipfile → StreamingResponse 的桥梁：write() 缓冲数据，flush() 取出并清空"""
+        def __init__(self):
+            self._buf = bytearray()
+        def write(self, data: bytes) -> int:
+            self._buf.extend(data)
+            return len(data)
+        def flush(self) -> bytes:
+            chunk = bytes(self._buf)
+            self._buf.clear()
+            return chunk
 
-        try:
-            # 使用ZIP_STORED（不压缩）提高速度，mp3本身已压缩
-            with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_STORED) as zip_file:
-                # 添加原始电子书文件
-                if book.file_path and os.path.exists(book.file_path):
-                    ebook_arcname = Path(book.file_path).name
-                    zip_file.write(book.file_path, ebook_arcname)
+    def generate_zip_stream():
+        pipe = _ZipPipe()
+        with zipfile.ZipFile(pipe, 'w', zipfile.ZIP_STORED) as zf:
+            if book.file_path and os.path.exists(book.file_path):
+                zf.write(book.file_path, Path(book.file_path).name)
+                yield pipe.flush()
 
-                for chapter in chapters:
-                    if os.path.exists(chapter.audio_path):
-                        ext = Path(chapter.audio_path).suffix
-                        arcname = f"{chapter.chapter_number:03d}_{chapter.title or chapter.id}{ext}"
-                        zip_file.write(chapter.audio_path, arcname)
+            for chapter in chapters:
+                if os.path.exists(chapter.audio_path):
+                    ext = Path(chapter.audio_path).suffix
+                    arcname = f"{chapter.chapter_number:03d}_{chapter.title or chapter.id}{ext}"
+                    zf.write(chapter.audio_path, arcname)
+                    yield pipe.flush()
 
-            # 流式读取并yield
-            with open(tmp_path, 'rb') as f:
-                while True:
-                    chunk = f.read(64 * 1024)  # 64KB chunks
-                    if not chunk:
-                        break
-                    yield chunk
-        finally:
-            # 清理临时文件
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+        yield pipe.flush()
 
     filename = urllib.parse.quote(f"{book.title}.zip")
     return StreamingResponse(
-        generate_zip(),
+        generate_zip_stream(),
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=utf-8''{filename}"
