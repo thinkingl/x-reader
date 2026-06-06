@@ -130,7 +130,33 @@ class NcxBookmarkMode(ChapterMode):
             if content and len(content) > 10:
                 chapters.append(Chapter(title=current_title or "Untitled", text_content=content))
 
-        return chapters
+        if not chapters:
+            return []
+
+        # 合并同名章节（如每卷重复的人物表）
+        title_map = {}
+        merged = []
+        for ch in chapters:
+            if ch.title in title_map:
+                existing = title_map[ch.title]
+                existing.text_content += "\n" + ch.text_content
+                existing.word_count = len(existing.text_content)
+            else:
+                title_map[ch.title] = ch
+                merged.append(ch)
+        chapters = merged
+
+        # 合并连续短章节（< 500字的附录/人物表等）
+        SHORT_THRESHOLD = 500
+        final = []
+        for ch in chapters:
+            if final and ch.word_count < SHORT_THRESHOLD and final[-1].word_count < SHORT_THRESHOLD:
+                final[-1].text_content += "\n" + ch.text_content
+                final[-1].word_count = len(final[-1].text_content)
+            else:
+                final.append(ch)
+
+        return final
 
     def _extract_epub(self, context: Dict[str, Any]) -> List[Chapter]:
         """EPUB: 用 href 映射到 spine 文件"""

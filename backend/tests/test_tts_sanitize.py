@@ -63,6 +63,88 @@ class TestSanitizeText:
         assert "你好" in result
         assert "测试" in result
 
+    def test_remove_fullwidth_parentheses(self):
+        """（） 替换为空格"""
+        result = sanitize_text("这是（测试内容）文本")
+        assert "（" not in result
+        assert "）" not in result
+        assert "测试内容" in result
+
+    def test_remove_square_brackets(self):
+        """[] 替换为空格"""
+        result = sanitize_text("这是[测试内容]文本")
+        assert "[" not in result
+        assert "]" not in result
+        assert "测试内容" in result
+
+    def test_remove_curly_braces(self):
+        """{} 替换为空格"""
+        result = sanitize_text("这是{测试内容}文本")
+        assert "{" not in result
+        assert "}" not in result
+        assert "测试内容" in result
+
+    def test_remove_tildes(self):
+        """～~ 替换为空格"""
+        result = sanitize_text("价格～50元~100元")
+        assert "～" not in result
+        assert "~" not in result
+
+    def test_preserve_basic_punctuation(self):
+        """保留基础标点：。，、；：！？…—""''"""
+        text = '他说："你好。"她回答：「嗯！」这是一个——测试……吧？'
+        result = sanitize_text(text)
+        assert "。" in result
+        assert "！" in result
+        assert "——" in result
+        assert "……" in result
+        assert "：" in result
+
+    def test_preserve_english_punctuation(self):
+        """保留英文标点：.,!?;:-"'"""
+        text = 'Hello, world! How are you? I\'m fine. She said: "Yes" - no.'
+        result = sanitize_text(text)
+        assert "," in result
+        assert "!" in result
+        assert "?" in result
+        assert "." in result
+        assert ":" in result
+        assert "'" in result
+        assert '"' in result
+
+    def test_remove_mixed_special_chars(self):
+        """移除混合特殊字符"""
+        text = "《我的奋斗》第一章（节选）内容【注释】"
+        result = sanitize_text(text)
+        assert "《" not in result and "》" not in result
+        assert "（" not in result and "）" not in result
+        assert "【" not in result and "】" not in result
+        assert "我的奋斗" in result
+        assert "第一章" in result
+        assert "节选" in result
+        assert "内容" in result
+        assert "注释" in result
+
+    def test_keep_only_basic_chars(self):
+        """只保留最基础的字符"""
+        text = "abc123你好！@#$%^&*()"
+        result = sanitize_text(text)
+        assert "abc" in result
+        assert "123" in result
+        assert "你好" in result
+        assert "！" in result
+        assert "@#$%^&*()" not in result
+
+    def test_chinese_with_parentheses_example(self):
+        """《我的奋斗》第一章中的典型内容"""
+        text = "在《我的奋斗》这本书中（第一卷），作者写道：「人生来就是受苦的。」"
+        result = sanitize_text(text)
+        assert "《" not in result and "》" not in result
+        assert "（" not in result and "）" not in result
+        assert "我的奋斗" in result
+        assert "第一卷" in result
+        assert "人生来就是受苦的" in result
+
     def test_all_symbols_removed_from_nana(self, parsed_nana):
         """《娜娜》中不应残留任何 TTS 无意义符号"""
         bad_chars = r'[《》〈〉「」『』【】〖〗]'
@@ -319,3 +401,103 @@ def parsed_nana():
 @pytest.fixture
 def parsed_worlds_end():
     return EpubParser(WORLDS_END_EPUB).parse()
+
+
+class TestHtmlHeadingMode:
+    """测试 HTML 标题模式"""
+
+    def test_extract_from_html_file(self, tmp_path):
+        """从 HTML 文件中提取 H3 章节"""
+        from app.services.chapter_modes.html_heading_mode import HtmlHeadingMode
+
+        html = """
+        <html><body>
+        <h3>Chapter 1</h3><p>Content one.</p>
+        <h3>Chapter 2</h3><p>Content two.</p>
+        <h3>Chapter 3</h3><p>Content three.</p>
+        </body></html>
+        """
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html)
+
+        mode = HtmlHeadingMode()
+        context = {"html_path": str(html_file), "text": "test"}
+        chapters = mode.extract(context)
+
+        assert len(chapters) == 3
+        assert chapters[0].title == "Chapter 1"
+        assert chapters[1].title == "Chapter 2"
+        assert chapters[2].title == "Chapter 3"
+
+    def test_filter_short_headings(self, tmp_path):
+        """过滤过短的标题"""
+        from app.services.chapter_modes.html_heading_mode import HtmlHeadingMode
+
+        html = """
+        <html><body>
+        <h3>A</h3><p>Short.</p>
+        <h3>Chapter 1</h3><p>Content one.</p>
+        <h3>X</h3><p>Short.</p>
+        <h3>Chapter 2</h3><p>Content two.</p>
+        <h3>Y</h3><p>Short.</p>
+        <h3>Chapter 3</h3><p>Content three.</p>
+        </body></html>
+        """
+        html_file = tmp_path / "test.html"
+        html_file.write_text(html)
+
+        mode = HtmlHeadingMode()
+        context = {"html_path": str(html_file), "text": "test"}
+        chapters = mode.extract(context)
+
+        assert len(chapters) == 3
+        assert chapters[0].title == "Chapter 1"
+        assert chapters[1].title == "Chapter 2"
+        assert chapters[2].title == "Chapter 3"
+
+    def test_applicable_requires_html_path(self):
+        """没有 html_path 时不可用"""
+        from app.services.chapter_modes.html_heading_mode import HtmlHeadingMode
+
+        mode = HtmlHeadingMode()
+        assert not mode.applicable({"text": "test"})
+        assert not mode.applicable({})
+
+
+class TestScoringOversizedPenalty:
+    """测试超大章节惩罚"""
+
+    def test_oversized_chapter_penalty(self):
+        """超大章节应被惩罚"""
+        from app.services.chapter_modes.base import Chapter, score_chapters
+
+        score_normal = score_chapters([
+            Chapter(title="Ch1", text_content="x" * 50_000),
+            Chapter(title="Ch2", text_content="x" * 50_000),
+            Chapter(title="Ch3", text_content="x" * 50_000),
+        ])
+        score_oversized = score_chapters([
+            Chapter(title="Ch1", text_content="x" * 50_000),
+            Chapter(title="Ch2", text_content="x" * 200_000),
+            Chapter(title="Ch3", text_content="x" * 50_000),
+        ])
+        assert score_oversized < score_normal
+
+    def test_proportional_penalty(self):
+        """惩罚与超出量成比例，不一刀切"""
+        from app.services.chapter_modes.base import Chapter, score_chapters
+
+        # 200K 惩罚 < 500K 惩罚 < 1M 惩罚
+        score_200k = score_chapters([
+            Chapter(title="Ch1", text_content="x" * 200_000),
+            Chapter(title="Ch2", text_content="x" * 50_000),
+        ])
+        score_500k = score_chapters([
+            Chapter(title="Ch1", text_content="x" * 500_000),
+            Chapter(title="Ch2", text_content="x" * 50_000),
+        ])
+        score_1m = score_chapters([
+            Chapter(title="Ch1", text_content="x" * 1_000_000),
+            Chapter(title="Ch2", text_content="x" * 50_000),
+        ])
+        assert score_200k > score_500k > score_1m

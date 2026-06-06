@@ -80,6 +80,7 @@ def score_chapters(chapters: List[Chapter]) -> float:
     # 2) 标题质量（0-30分）—— 全部章节
     title_scores = []
     default_titles = {"Chapter", "章节", "正文", "无标题"}
+    generic_prefixes = ("Chapter ", "Chapter_", "第 ", "第")
     for ch in chapters:
         t = ch.title.strip()
         if not t:
@@ -88,8 +89,10 @@ def score_chapters(chapters: List[Chapter]) -> float:
         s = 10  # 有标题基础分
         if 3 <= len(t) <= 50:
             s += 10  # 长度合理
-        if t not in default_titles and not t.startswith("Chapter "):
+        if t not in default_titles and not any(t.startswith(p) for p in generic_prefixes):
             s += 10  # 非默认标题
+        else:
+            s -= 5  # 通用标题额外扣分（会截断句子）
         title_scores.append(s)
     title_score = sum(title_scores) / n
 
@@ -114,7 +117,53 @@ def score_chapters(chapters: List[Chapter]) -> float:
     else:
         uniformity_score = 0.0
 
-    total = sequential_score + title_score + uniformity_score
+    # 4) 超大章节惩罚 —— 超过 100K 字按比例扣分，不一刀切
+    penalty = 0.0
+    for ch in chapters:
+        if ch.word_count > 100_000:
+            ratio = ch.word_count / 100_000
+            # 100K→0, 200K→5, 500K→15, 1M→25
+            penalty += min(25.0, (ratio - 1) * 5.0)
+    penalty = min(80.0, penalty)
+
+    # 5) 标题重复惩罚 —— 多数章节标题相同说明分章失败
+    title_counts = {}
+    for ch in chapters:
+        t = ch.title.strip()
+        title_counts[t] = title_counts.get(t, 0) + 1
+    max_dup = max(title_counts.values()) if title_counts else 0
+    dup_ratio = max_dup / n if n > 0 else 0
+    if dup_ratio > 0.5:
+        penalty += min(30.0, (dup_ratio - 0.5) * 60.0)
+
+    # 6) 截断句子惩罚 —— 章节末尾没有正常结束标点，说明切分点错误
+    # 排除歌词/古诗（连续多行无标点是正常格式）
+    sentence_enders = set('。！？…!?."）」』')
+    cut_count = 0
+    for ch in chapters:
+        text = ch.text_content.rstrip()
+        if not text or text[-1] in sentence_enders:
+            continue
+        # 检查是否是歌词/古诗（连续无标点行占比高）
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        if lines:
+            no_punct_lines = sum(1 for l in lines if l and l[-1] not in sentence_enders)
+            if no_punct_lines / len(lines) > 0.6:
+                continue  # 歌词/古诗，不惩罚
+        cut_count += 1
+    cut_ratio = cut_count / n if n > 0 else 0
+    if cut_ratio > 0.3:
+        penalty += min(40.0, (cut_ratio - 0.3) * 80.0)
+
+    # 7) 过少章节惩罚 —— 少于 10 章通常分章失败
+    if n < 10:
+        penalty += (10 - n) * 5.0
+
+    # 8) 多章节奖励 —— 检测到更多章节通常更准确（对数奖励，上限 30 分）
+    import math
+    bonus = min(30.0, math.log2(max(n, 1)) * 5.0)
+
+    total = sequential_score + title_score + uniformity_score - penalty + bonus
     logger.debug(
         f"Score: seq={sequential_score:.1f} title={title_score:.1f} "
         f"uniform={uniformity_score:.1f} total={total:.1f} "

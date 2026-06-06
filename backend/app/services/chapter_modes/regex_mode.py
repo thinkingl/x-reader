@@ -15,18 +15,22 @@ _PATTERNS = {
     "chinese_lecture": re.compile(r'^第\s*[0-9零一二三四五六七八九十百千万]+\s*讲'),
     "chinese_volume": re.compile(r'^第\s*[0-9零一二三四五六七八九十百千万]+\s*卷'),
     "chinese_part": re.compile(r'^第\s*[0-9零一二三四五六七八九十百千万]+\s*部'),
+    "chinese_number_title": re.compile(r'^[一二三四五六七八九十百千]{1,4}[　\s]+\S'),
+    "chinese_zhang_title": re.compile(r'^章[一二三四五六七八九十百千]{1,4}[　\s]+\S'),
     "english_chapter": re.compile(r'^Chapter\s+\d+', re.IGNORECASE),
     "dash_number": re.compile(r'^-\d{1,4}-$'),
     "numbered_title": re.compile(r'^\d{1,4}[．.]\s*\S'),
     "uppercase_name": re.compile(r'^[A-Z][A-Z ]{2,30}$'),
+    "numbered_or_uppercase": re.compile(r'^(\d{1,4}[．.]\s*)?[A-Z][A-Z ]{2,30}$'),
     "special_markers": re.compile(r'^(序言|前言|后记|附录|楔子|引子|尾声|终章|卷末|跋|总论)$'),
 }
 
 # 模式是否需要前后空行验证（防止正文中的误匹配）
 _NEEDS_BLANK_LINE = {
-    "chinese_chapter", "chinese_section", "chinese_lecture",
-    "chinese_volume", "chinese_part", "english_chapter",
-    "numbered_title", "special_markers",
+    "chinese_section", "chinese_lecture",
+    "chinese_volume", "chinese_part",
+    "english_chapter",
+    "numbered_title", "numbered_or_uppercase", "special_markers",
 }
 
 
@@ -64,6 +68,25 @@ class RegexChapterMode(ChapterMode):
                 if not (prev_blank or next_blank):
                     continue
             boundaries.append((i, stripped))
+
+        if len(boundaries) < 2:
+            return []
+
+        # 检测并跳过目录区域（连续多个匹配在 10 行内，且密度 > 0.5 行/个）
+        toc_indices = set()
+        for a in range(len(boundaries)):
+            count = 1
+            for b in range(a + 1, len(boundaries)):
+                if boundaries[b][0] - boundaries[a][0] <= 10:
+                    count += 1
+                else:
+                    break
+            if count >= 4:  # 10 行内至少 4 个匹配才是目录
+                for b in range(a, a + count):
+                    toc_indices.add(b)
+
+        if toc_indices:
+            boundaries = [b for i, b in enumerate(boundaries) if i not in toc_indices]
 
         if len(boundaries) < 2:
             return []

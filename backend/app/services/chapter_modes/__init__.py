@@ -4,12 +4,14 @@ from .base import Chapter, ParseResult, ChapterMode, score_chapters, build_chapt
 from .regex_mode import RegexChapterMode, create_all_regex_modes
 from .ncx_mode import NcxBookmarkMode, parse_ncx
 from .spine_mode import SpineFileMode
+from .html_heading_mode import HtmlHeadingMode
 
 __all__ = [
     "Chapter", "ParseResult", "ChapterMode", "score_chapters", "build_chapters", "_is_special",
     "RegexChapterMode", "create_all_regex_modes",
     "NcxBookmarkMode", "parse_ncx",
     "SpineFileMode",
+    "HtmlHeadingMode",
     "select_best_mode",
 ]
 

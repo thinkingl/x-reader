@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.services.chapter_modes import (
     Chapter, score_chapters, build_chapters, select_best_mode,
-    create_all_regex_modes, NcxBookmarkMode, SpineFileMode,
+    create_all_regex_modes, NcxBookmarkMode, SpineFileMode, HtmlHeadingMode,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,6 +79,17 @@ _CIRCLED_RE = re.compile(r'[①②③④⑤⑥⑦⑧⑨⑩]')
 # TTS 不友好的符号，替换为空格
 _TTS_NONSPEECH_RE = re.compile(r'[《》〈〉「」『』【】〖〗♦●◆◇★☆○●◎◇◆□■△▲▽▼※→←↑↓↔↕♠♣♥♦♪♫]')
 
+_TTS_DISALLOWED_RE = re.compile(
+    r'[^\u4e00-\u9fff'                    # CJK Unified Ideographs
+    r'A-Za-z0-9'                          # ASCII letters and digits
+    r'\s'                                 # Whitespace
+    r'。，、；：！？…—'                   # Chinese sentence punctuation
+    r'\u201c\u201d\u2018\u2019'           # Chinese quotation marks
+    r'／·'                               # Other Chinese punctuation
+    r'.,!?;:"\'-/'                        # English punctuation
+    r']'
+)
+
 _MULTI_BLANK_RE = re.compile(r'\n{3,}')
 
 # 句子结束字符（中文+英文），或连续3个以上装饰符号
@@ -112,8 +123,8 @@ def unwrap_text(text: str) -> str:
 
 
 def sanitize_text(text: str) -> str:
-    """清理 TTS 不适用的符号，规范化空白"""
-    text = _TTS_NONSPEECH_RE.sub(' ', text)
+    """清理 TTS 不适用的符号，规范化空白（只保留基础标点）"""
+    text = _TTS_DISALLOWED_RE.sub(' ', text)
     text = _MULTI_BLANK_RE.sub('\n\n', text)
     text = text.strip()
     return text
@@ -282,7 +293,9 @@ class EpubParser:
                 ncx_href = candidates[0]
         # 规范化路径（manifest 中的 href 相对于 opf_dir）
         if ncx_href and opf_dir != ".":
-            ncx_href = f"{opf_dir}/{ncx_href}"
+            # 避免重复添加 opf_dir（如 OEBPS/toc.ncx 已包含 OEBPS/）
+            if not ncx_href.startswith(opf_dir):
+                ncx_href = f"{opf_dir}/{ncx_href}"
 
         ncx_path = None
         if ncx_href:
@@ -333,6 +346,31 @@ class EpubParser:
                 chapters = spine_mode.extract(context)
                 if chapters:
                     candidates.append(("spine_file", chapters))
+
+            # 正则模式（在合并文本上尝试）
+            all_text = []
+            for idref in spine_ids:
+                if idref not in manifest:
+                    continue
+                href = manifest[idref]
+                file_path = href if opf_dir == "." else f"{opf_dir}/{href}"
+                if file_path not in epub_zip.namelist():
+                    continue
+                content_bytes = epub_zip.read(file_path)
+                content = content_bytes.decode("utf-8", errors="ignore")
+                soup = BeautifulSoup(content, "html.parser")
+                text = soup.get_text(separator="\n", strip=True)
+                if text:
+                    all_text.append(text)
+            combined_text = "\n".join(all_text)
+
+            if combined_text:
+                text_context = {"text": combined_text}
+                for mode in create_all_regex_modes():
+                    if mode.applicable(text_context):
+                        chapters = mode.extract(text_context)
+                        if chapters:
+                            candidates.append((mode.name, chapters))
 
             # 选择最佳
             best_name, best_chapters = select_best_mode(candidates, min_score=20)
@@ -782,6 +820,13 @@ class MobiParser:
             if chapters:
                 candidates.append(("ncx_bookmark", chapters))
 
+        # HTML 标题模式（h1/h2/h3）
+        heading_mode = HtmlHeadingMode()
+        if heading_mode.applicable(context):
+            chapters = heading_mode.extract(context)
+            if chapters:
+                candidates.append(("html_heading", chapters))
+
         # 正则模式（在文本上尝试各种模式）
         text = context["text"]
         if text:
@@ -951,20 +996,36 @@ class MobiParser:
         if not chapters:
             return None
 
-        # 去重 + 重编号
-        seen = {}
-        for i, ch in enumerate(chapters):
+        # 合并同名章节（如每卷重复的人物表）
+        title_map = {}
+        merged = []
+        for ch in chapters:
             t = ch["title"]
-            if t in seen:
-                prev_i = seen[t]
-                if chapters[prev_i]["word_count"] < chapters[i]["word_count"]:
-                    chapters.pop(prev_i)
-                else:
-                    chapters.pop(i)
-                for j, c in enumerate(chapters):
-                    c["chapter_number"] = j + 1
-                break
-            seen[t] = i
+            if t in title_map:
+                # 合并到已有章节
+                existing = title_map[t]
+                existing["text_content"] += "\n" + ch["text_content"]
+                existing["word_count"] = len(existing["text_content"])
+            else:
+                title_map[t] = ch
+                merged.append(ch)
+        chapters = merged
+
+        # 合并连续短章节（< 500字的附录/人物表等）
+        SHORT_THRESHOLD = 500
+        final = []
+        for ch in chapters:
+            if final and ch["word_count"] < SHORT_THRESHOLD and final[-1]["word_count"] < SHORT_THRESHOLD:
+                # 合并到前一章
+                final[-1]["text_content"] += "\n" + ch["text_content"]
+                final[-1]["word_count"] = len(final[-1]["text_content"])
+            else:
+                final.append(ch)
+        chapters = final
+
+        # 重编号
+        for i, ch in enumerate(chapters):
+            ch["chapter_number"] = i + 1
 
         # 清理
         for ch in chapters:
