@@ -716,7 +716,7 @@ def download_book_audio_zip(book_id: int, db: Session = Depends(get_db), _auth: 
         raise HTTPException(404, "No audio files found")
 
     def generate_zip_stream():
-        z = zipstream.ZipFile(mode='w', compression=zipstream.ZIP_STORED)
+        z = zipstream.ZipFile(mode='w', compression=zipstream.ZIP_STORED, allowZip64=True)
         
         # 添加电子书文件
         if book.file_path and os.path.exists(book.file_path):
