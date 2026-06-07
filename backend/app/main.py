@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import zipfile
+import zipstream
 import io
 import logging
 import urllib.parse
@@ -715,22 +716,23 @@ def download_book_audio_zip(book_id: int, db: Session = Depends(get_db), _auth: 
         raise HTTPException(404, "No audio files found")
 
     def generate_zip_stream():
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
-            if book.file_path and os.path.exists(book.file_path):
-                zf.write(book.file_path, Path(book.file_path).name)
-
-            for chapter in chapters:
-                if os.path.exists(chapter.audio_path):
-                    ext = Path(chapter.audio_path).suffix
-                    arcname = f"{chapter.chapter_number:03d}_{chapter.title or chapter.id}{ext}"
-                    zf.write(chapter.audio_path, arcname)
-
-        buf.seek(0)
-        while True:
-            chunk = buf.read(256 * 1024)
-            if not chunk:
-                break
+        z = zipstream.ZipFile(mode='w', compression=zipstream.ZIP_STORED)
+        
+        # 添加电子书文件
+        if book.file_path and os.path.exists(book.file_path):
+            z.write(book.file_path, arcname=Path(book.file_path).name)
+        
+        # 添加音频文件
+        for chapter in chapters:
+            if os.path.exists(chapter.audio_path):
+                ext = Path(chapter.audio_path).suffix
+                arcname = f"{chapter.chapter_number:03d}_{chapter.title or chapter.id}{ext}"
+                z.write(chapter.audio_path, arcname)
+            else:
+                logging.warning(f"Audio file not found: {chapter.audio_path}")
+        
+        # 流式生成ZIP数据块
+        for chunk in z:
             yield chunk
 
     filename = urllib.parse.quote(f"{book.title}.zip")
