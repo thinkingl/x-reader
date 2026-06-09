@@ -726,7 +726,8 @@ def download_book_audio_zip(book_id: int, db: Session = Depends(get_db), _auth: 
         for chapter in chapters:
             if os.path.exists(chapter.audio_path):
                 ext = Path(chapter.audio_path).suffix
-                arcname = f"{chapter.chapter_number:03d}_{chapter.title or chapter.id}{ext}"
+                title = re.sub(r'[/\\:*?"<>|]', '-', chapter.title or str(chapter.id))
+                arcname = f"{chapter.chapter_number:03d}_{title}{ext}"
                 z.write(chapter.audio_path, arcname)
             else:
                 logging.warning(f"Audio file not found: {chapter.audio_path}")
